@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Регистрация — турнир по CS2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0B0C0E;--panel:#16181B;--panel2:#1D2023;--line:#2A2D31;
+  --text:#E8E6E1;--muted:#8B8F94;--accent:#F2A900;--accent-dim:#7A5A17;--danger:#C93B3B;
+  box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:inherit;margin:0;padding:0}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%}
+body{background:var(--bg);color:var(--text);font-family:'Inter',system-ui,sans-serif;line-height:1.5}
+h1,h2{font-family:'Oswald',system-ui,sans-serif}
+.wrap{max-width:680px;margin:0 auto;padding:0 22px}
+header.top{padding:16px 0 0;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+.topbar{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--muted);padding-bottom:12px;gap:10px;flex-wrap:wrap}
+.topbar b{color:var(--accent);font-weight:600}
+.topbar-right{display:flex;gap:10px;align-items:center}
+.mini-btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:6px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.mini-btn:hover{border-color:var(--accent)}
+.nav{display:flex;gap:20px;overflow-x:auto}
+.nav button{background:none;border:none;color:var(--muted);font-family:'Oswald';font-size:13px;padding:0 0 10px;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.nav button.active{color:var(--accent);border-color:var(--accent)}
+.nav button.hidden{display:none}
+.page{display:none}
+.page.active{display:block}
+.hero{padding:28px 0 18px}
+.hero .kicker{color:var(--accent);font-size:13px;letter-spacing:.04em;margin-bottom:10px}
+.hero h1{font-size:clamp(24px,6vw,36px);font-weight:700;line-height:1.05}
+.hero p{margin-top:14px;color:var(--muted);font-size:15px;max-width:54ch}
+section{padding:22px 0}
+.card{background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--accent);padding:22px}
+.qlabel{font-family:'Oswald';font-size:16px;margin-bottom:12px}
+.qnum{color:var(--accent);margin-right:6px}
+.q-block{margin-bottom:22px}
+.q-block.hidden{display:none}
+.choice-row{display:flex;gap:10px}
+.choice{flex:1;position:relative}
+.choice input{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0}
+.choice .box{border:1px solid var(--line);background:var(--bg);text-align:center;padding:12px;font-size:14px;color:var(--muted)}
+.choice input:checked+.box{border-color:var(--accent);color:var(--accent)}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+.field-row{display:flex;gap:8px;align-items:stretch}
+.field-row input{flex:1}
+input[type=text],input[type=number],input[type=url],input[type=password],input[type=datetime-local],select,textarea{
+  width:100%;background:var(--bg);border:1px solid var(--line);color:var(--text);
+  padding:10px 11px;font-size:14px;font-family:inherit;outline:none
+}
+input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+.none-btn{white-space:nowrap;background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:0 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.none-btn.active{border-color:var(--accent);color:var(--accent)}
+.hint{font-size:12px;color:var(--muted);margin-top:6px}
+button.submit{width:100%;background:var(--accent);color:#141414;border:none;font-family:'Oswald';font-weight:600;font-size:15px;padding:14px;cursor:pointer;margin-top:4px}
+button.submit:hover{background:#ffb821}
+button.submit:disabled{opacity:.5;cursor:not-allowed}
+.err{color:var(--danger);font-size:13px;margin-top:8px;display:none}
+.err.show{display:block}
+.confirm{display:none;padding:20px;border:1px solid var(--accent-dim);background:var(--panel2);margin-top:16px;font-size:15px}
+.confirm.show{display:block}
+.confirm .ok{color:var(--accent);font-family:'Oswald';font-size:18px;margin-bottom:4px}
+.session-banner{background:var(--panel2);border:1px solid var(--accent-dim);padding:14px 16px;font-size:14px;display:none;margin-bottom:18px;justify-content:space-between;align-items:center;gap:10px}
+.session-banner.show{display:flex}
+.section-title{font-size:22px;font-weight:600;margin-bottom:4px}
+.section-sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+.team-card{border:1px solid var(--line);background:var(--panel);padding:14px 16px;margin-bottom:10px}
+.team-head{display:flex;gap:12px;align-items:center}
+.team-logo{width:38px;height:38px;object-fit:cover;background:var(--bg);border:1px solid var(--line);flex-shrink:0}
+.team-logo.empty{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px}
+.team-info{flex:1;min-width:0}
+.team-name{font-family:'Oswald';font-size:15px}
+.team-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.badge{font-size:11px;padding:2px 7px;border:1px solid var(--line);color:var(--muted)}
+.badge.open{color:var(--accent);border-color:var(--accent-dim)}
+.roster{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+.roster-row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+.roster-row:last-child{border-bottom:none}
+.roster-row .rn{color:var(--text)}
+.roster-row .rm{color:var(--muted)}
+.empty-note{color:var(--muted);font-size:13px}
+.banner{background:var(--panel2);border:1px solid var(--accent-dim);padding:12px 14px;font-size:13px;color:var(--muted);margin-bottom:18px;display:none}
+.banner.show{display:block}
+.bracket-wrap{overflow-x:auto;padding-bottom:8px}
+.bracket{display:flex;gap:26px;min-width:min-content}
+.round{display:flex;flex-direction:column;justify-content:space-around;gap:18px;min-width:190px}
+.round-title{font-family:'Oswald';font-size:12px;color:var(--muted);text-align:center;margin-bottom:6px;text-transform:uppercase}
+.match{background:var(--panel);border:1px solid var(--line);border-left:2px solid var(--accent-dim)}
+.match .t{padding:8px 10px;font-size:13px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
+.match .t:last-child{border-bottom:none}
+.match .t.tbd{color:var(--muted)}
+.match .t.win{color:var(--accent)}
+.match .meta{font-size:11px;color:var(--muted);padding:4px 10px}
+.order-row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);padding:10px 14px;margin-bottom:8px}
+.order-row .name{flex:1;font-family:'Oswald';font-size:14px;white-space:normal}
+.order-row button{background:var(--panel2);border:1px solid var(--line);color:var(--text);min-width:30px;height:30px;cursor:pointer;font-size:13px}
+.order-row button:hover{border-color:var(--accent)}
+.login-panel{display:none;background:var(--panel);border:1px solid var(--line);border-top:2px solid var(--accent);padding:20px;margin-top:14px}
+.login-panel.show{display:block}
+.admin-match{border:1px solid var(--line);background:var(--panel);padding:14px;margin-bottom:12px}
+.admin-match .mt{font-family:'Oswald';font-size:14px;margin-bottom:8px}
+.map-grid{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.map-chip{background:var(--panel2);border:1px solid var(--line);color:var(--text);padding:8px 12px;font-size:13px;cursor:pointer}
+.map-chip:hover{border-color:var(--accent)}
+.map-chip.gone{opacity:.3;text-decoration:line-through;cursor:not-allowed}
+.veto-log{margin-top:10px;font-size:13px;color:var(--muted)}
+.veto-log div{padding:3px 0}
+footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;color:var(--muted);font-size:12px;text-align:center}
+@media(max-width:480px){.choice-row{flex-direction:column}.field-row{flex-direction:column}}
+</style>
+</head>
+<body>
+
+<header class="top"><div class="wrap">
+  <div class="topbar">
+    <span><b>OPERATION FRAGOUT</b> · турнир CS2</span>
+    <div class="topbar-right">
+      <span id="teamCount">команд: —</span>
+      <button type="button" class="mini-btn" id="loginToggleBtn">Войти</button>
+      <button type="button" class="mini-btn hidden" id="logoutBtn">Выйти</button>
+    </div>
+  </div>
+  <div class="nav">
+    <button type="button" class="active" data-page="reg">Регистрация</button>
+    <button type="button" data-page="announcements">Анонсы</button>
+    <button type="button" data-page="rosters">Составы команд</button>
+    <button type="button" data-page="bracket">Сетка команд</button>
+    <button type="button" data-page="veto">Пики и баны</button>
+    <button type="button" class="hidden" data-page="admin" id="adminNavBtn">Админ-панель</button>
+  </div>
+</div></header>
+
+<div class="wrap">
+  <div class="login-panel" id="loginPanel">
+    <div class="field"><label for="liLogin">Логин</label><input type="text" id="liLogin"></div>
+    <div class="field"><label for="liPassword">Пароль</label><input type="password" id="liPassword"></div>
+    <button type="button" class="submit" id="loginSubmitBtn">Войти</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+</div>
+
+<div class="page active" id="page-reg">
+  <div class="wrap">
+    <div class="session-banner" id="sessionBanner"><span id="sessionText"></span></div>
+    <div class="hero">
+      <div class="kicker">РЕГИСТРАЦИЯ УЧАСТНИКОВ</div>
+      <h1>Заполни анкету за минуту</h1>
+      <p>Собери команду или присоединись к существующей. После отправки анкеты ты автоматически входишь в систему.</p>
+    </div>
+  </div>
+
+  <div class="wrap" id="formSection">
+  <section>
+    <div class="banner" id="dbBanner">Не удалось связаться с таблицей — проверь APPS_SCRIPT_URL и доступ к веб-приложению.</div>
+    <div class="card">
+    <form id="regForm" novalidate>
+      <div class="q-block" data-q="hasTeam">
+        <div class="qlabel"><span class="qnum">1</span>Есть ли у тебя команда?</div>
+        <div class="choice-row">
+          <label class="choice"><input type="radio" name="hasTeam" value="yes" required><span class="box">Да, есть</span></label>
+          <label class="choice"><input type="radio" name="hasTeam" value="no" required><span class="box">Нет</span></label>
+        </div>
+      </div>
+      <div class="q-block hidden" data-block="role">
+        <div class="qlabel"><span class="qnum">1.1</span>Ты капитан команды или её участник?</div>
+        <div class="choice-row">
+          <label class="choice"><input type="radio" name="role" value="captain"><span class="box">Капитан</span></label>
+          <label class="choice"><input type="radio" name="role" value="member"><span class="box">Участник</span></label>
+        </div>
+      </div>
+      <div class="q-block hidden" data-block="captain">
+        <div class="qlabel"><span class="qnum">1.2</span>Информация о команде</div>
+        <div class="field"><label for="teamName">Какое название у твоей команды?</label><input type="text" id="teamName"></div>
+        <div class="field"><label for="teamLogo">Ссылка на лого команды (необязательно)</label><input type="url" id="teamLogo"></div>
+        <div class="field">
+          <label>Нужны ли ещё участники в команду?</label>
+          <div class="choice-row">
+            <label class="choice"><input type="radio" name="needMore" value="yes"><span class="box">Да, нужны</span></label>
+            <label class="choice"><input type="radio" name="needMore" value="no"><span class="box">Нет, состав полный</span></label>
+          </div>
+        </div>
+        <div class="field hidden" data-block="teamPass"><label for="teamPassword">Пароль для вступления в команду</label><input type="text" id="teamPassword"></div>
+      </div>
+      <div class="q-block hidden" data-block="member">
+        <div class="qlabel"><span class="qnum">1.2</span>Выбери команду</div>
+        <div class="field"><select id="joinTeam"><option value="">— выбери команду —</option></select></div>
+        <div class="field hidden" data-block="joinPass"><label for="joinPassword">Пароль команды</label><input type="text" id="joinPassword"></div>
+      </div>
+      <div class="q-block hidden" data-block="common">
+        <div class="field"><label for="pName"><span class="qnum">1.3</span>Как тебя зовут?</label><input type="text" id="pName" required></div>
+        <div class="field"><label for="pNick"><span class="qnum">1.3.1</span>Ваш ник</label><input type="text" id="pNick" required></div>
+        <div class="field"><label for="pDiscord"><span class="qnum">1.4</span>Тег Discord</label><input type="text" id="pDiscord" required></div>
+        <div class="field"><label for="pTelegram"><span class="qnum">1.5</span>Тег Telegram</label><input type="text" id="pTelegram" required></div>
+        <div class="field"><label for="pFaceitLink"><span class="qnum">1.6</span>Ссылка на профиль Faceit</label>
+          <div class="field-row"><input type="url" id="pFaceitLink"><button type="button" class="none-btn" data-toggle="pFaceitLink">Нету</button></div></div>
+        <div class="field"><label for="pFaceitLvl"><span class="qnum">1.7</span>Уровень (lvl) Faceit</label>
+          <div class="field-row"><input type="number" id="pFaceitLvl" min="1" max="10"><button type="button" class="none-btn" data-toggle="pFaceitLvl">Нету</button></div></div>
+        <div class="field"><label for="pPremier"><span class="qnum">1.8</span>Рейтинг Premier, тыс.</label>
+          <div class="field-row"><input type="number" id="pPremier" min="0"><button type="button" class="none-btn" data-toggle="pPremier">Нету</button></div></div>
+        <div class="field"><label for="pHours"><span class="qnum">1.9</span>Сколько часов в CS2?</label><input type="number" id="pHours" min="0" required></div>
+        <div class="field"><label for="pSteam"><span class="qnum">1.10</span>Ссылка на профиль Steam</label><input type="url" id="pSteam" required></div>
+        <div class="field"><label for="pLogin"><span class="qnum">1.11</span>Придумай логин</label><input type="text" id="pLogin" required></div>
+        <div class="field"><label for="pPassword"><span class="qnum">1.12</span>Придумай пароль</label><input type="password" id="pPassword" required></div>
+      </div>
+      <button type="submit" class="submit" id="submitBtn">Подать заявку</button>
+      <div class="err" id="formErr"></div>
+      <div class="confirm" id="confirmBox"><div class="ok">Спасибо за регистрацию!</div><span id="confirmText"></span></div>
+    </form>
+    </div>
+  </section>
+  </div>
+</div>
+
+<div class="page" id="page-announcements"><div class="wrap"><section>
+  <div class="section-title">Анонсы</div>
+  <div class="section-sub">Новости и объявления от организаторов</div>
+  <div id="announcementsList"></div>
+</section></div></div>
+
+<div class="page" id="page-rosters"><div class="wrap"><section>
+  <div class="section-title">Составы команд</div>
+  <div class="section-sub">Ник, уровень Faceit и рейтинг каждого участника</div>
+  <div id="rostersList"></div>
+</section></div></div>
+
+<div class="page" id="page-bracket"><div class="wrap"><section>
+  <div class="section-title">Сетка турнира</div>
+  <div class="section-sub">1 и 2 раунд — Bo3, начиная с 3 раунда — Bo5</div>
+  <div class="bracket-wrap"><div class="bracket" id="bracketRoot"></div></div>
+</section></div></div>
+
+<div class="page" id="page-veto"><div class="wrap"><section>
+  <div class="section-title">Пики и баны карт</div>
+  <div class="section-sub">Открываются за 24 часа до матча. Голосовать может только капитан играющей команды.</div>
+  <div id="vetoList"></div>
+</section></div></div>
+
+<div class="page" id="page-admin"><div class="wrap"><section>
+  <div class="section-title">Админ-панель</div>
+
+  <div class="section-title" style="font-size:16px;margin-top:16px">Состав команд</div>
+  <div id="adminTeamsList"></div>
+
+  <div class="section-title" style="font-size:16px;margin-top:26px">Анонсы</div>
+  <div class="field"><textarea id="annText" rows="3" placeholder="Текст анонса"></textarea></div>
+  <button type="button" class="submit" id="addAnnBtn">Опубликовать</button>
+  <div class="err" id="annErr"></div>
+  <div id="adminAnnList" style="margin-top:14px"></div>
+
+  <div class="section-title" style="font-size:16px;margin-top:26px">Порядок команд перед генерацией сетки</div>
+  <div id="orderList"></div>
+  <button type="button" class="submit" id="saveOrderBtn">Сохранить порядок</button>
+  <div class="err" id="orderErr"></div>
+
+  <div class="section-title" style="font-size:16px;margin-top:26px">Сетка турнира</div>
+  <div class="hint">Генерация построит сетку заново из порядка выше — уже проведённые матчи сотрутся.</div>
+  <button type="button" class="submit" id="genBracketBtn">Сгенерировать / пересоздать сетку</button>
+  <div class="err" id="genErr"></div>
+  <div id="adminBracketList" style="margin-top:16px"></div>
+</section></div></div>
+
+<footer><div class="wrap">OPERATION FRAGOUT — регистрация на турнир по CS2</div></footer>
+
+<script>
+(function(){
+  const FREE_AGENTS_NAME = 'Свободные агенты';
+  const MAP_POOL = ['Anubis','Nuke','Dust2','Mirage','Ancient','Cache','Inferno'];
+  const APPS_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyJAanTHSCWqPpE9FXlM_p_hu3S81Kji1QlXpJ1AXmsBZyTXxr3feVEofcIUVwCEqA/exec';
+  const ADMIN_LOGIN = 'ggujdov';
+  const ADMIN_PASSWORD = 'NtgLelN2r';
+
+  let teamsCache = {};
+  let orderCache = [];
+  let localOrder = [];
+  let annCache = [];
+  let bracketCache = null;
+  let isAdmin = false;
+
+  function getSession(){ try{ return JSON.parse(localStorage.getItem('cs2_session')||'null'); }catch(e){ return null; } }
+  function setSession(s){ localStorage.setItem('cs2_session', JSON.stringify(s)); renderSession(); }
+  function clearSession(){ localStorage.removeItem('cs2_session'); isAdmin=false; renderSession(); }
+  function renderSession(){
+    const s = getSession();
+    document.getElementById('logoutBtn').classList.toggle('hidden', !s);
+    document.getElementById('loginToggleBtn').classList.toggle('hidden', !!s);
+    document.getElementById('adminNavBtn').classList.toggle('hidden', !isAdmin);
+    const banner = document.getElementById('sessionBanner');
+    if(s){
+      banner.classList.add('show');
+      document.getElementById('sessionText').textContent = 'Ты вошёл как ' + s.nick + (s.teamName ? ' · команда: ' + s.teamName : '');
+      document.getElementById('formSection').style.display = 'none';
+    } else {
+      banner.classList.remove('show');
+      document.getElementById('formSection').style.display = '';
+    }
+  }
+  document.getElementById('loginToggleBtn').addEventListener('click', ()=> document.getElementById('loginPanel').classList.toggle('show'));
+  document.getElementById('logoutBtn').addEventListener('click', clearSession);
+  document.getElementById('loginSubmitBtn').addEventListener('click', async ()=>{
+    const login = document.getElementById('liLogin').value.trim();
+    const password = document.getElementById('liPassword').value;
+    const errEl = document.getElementById('loginErr');
+    errEl.classList.remove('show');
+    if(login === ADMIN_LOGIN && password === ADMIN_PASSWORD){
+      isAdmin = true;
+      setSession({login, nick:'Админ', teamName:''});
+      document.getElementById('loginPanel').classList.remove('show');
+      return;
+    }
+    try{
+      const res = await jsonp({action:'login', login, password});
+      if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
+      sessionStorage.setItem('cs2_pw', password);
+      setSession({login, nick: res.nick, teamName: res.teamName});
+      document.getElementById('loginPanel').classList.remove('show');
+    }catch(e){ errEl.textContent = 'Не удалось войти.'; errEl.classList.add('show'); }
+  });
+
+  document.querySelectorAll('.nav button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      if(btn.classList.contains('hidden')) return;
+      document.querySelectorAll('.nav button').forEach(b=>b.classList.remove('active'));
+      document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+      btn.classList.add('active');
+      const pg = btn.getAttribute('data-page');
+      document.getElementById('page-' + pg).classList.add('active');
+      if(pg === 'bracket') renderBracket();
+      if(pg === 'rosters') renderRosters();
+      if(pg === 'announcements') renderAnnouncements();
+      if(pg === 'veto') renderVeto();
+      if(pg === 'admin'){ renderAdmin(); renderAdminAnn(); renderAdminBracket(); }
+    });
+  });
+
+  const form = document.getElementById('regForm');
+  const blocks = {
+    role: document.querySelector('[data-block="role"]'), captain: document.querySelector('[data-block="captain"]'),
+    teamPass: document.querySelector('[data-block="teamPass"]'), member: document.querySelector('[data-block="member"]'),
+    joinPass: document.querySelector('[data-block="joinPass"]'), common: document.querySelector('[data-block="common"]')
+  };
+  function val(name){ const el = form.querySelector('[name="'+name+'"]:checked'); return el ? el.value : ''; }
+  function toggle(el, show){ if(el) el.classList.toggle('hidden', !show); }
+  function recompute(){
+    const hasTeam = val('hasTeam'), role = val('role'), needMore = val('needMore');
+    toggle(blocks.role, hasTeam === 'yes');
+    toggle(blocks.captain, hasTeam === 'yes' && role === 'captain');
+    toggle(blocks.teamPass, hasTeam === 'yes' && role === 'captain' && needMore === 'no');
+    toggle(blocks.member, hasTeam === 'yes' && role === 'member');
+    const selTeam = teamsCache[document.getElementById('joinTeam').value];
+    toggle(blocks.joinPass, hasTeam === 'yes' && role === 'member' && !!selTeam && selTeam.open === false);
+    toggle(blocks.common, hasTeam === 'no' || (hasTeam === 'yes' && !!role));
+  }
+  form.addEventListener('change', recompute);
+  document.getElementById('joinTeam').addEventListener('change', recompute);
+  document.querySelectorAll('.none-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const input = document.getElementById(btn.getAttribute('data-toggle'));
+      const active = btn.classList.toggle('active');
+      input.disabled = active; input.value = '';
+    });
+  });
+
+  function jsonp(params){
+    return new Promise((resolve, reject)=>{
+      const cbName = 'cb_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+      const script = document.createElement('script');
+      const qs = new URLSearchParams(Object.assign({}, params, {callback: cbName})).toString();
+      const timer = setTimeout(()=>{ cleanup(); reject(new Error('timeout')); }, 12000);
+      function cleanup(){ delete window[cbName]; script.remove(); clearTimeout(timer); }
+      window[cbName] = (data)=>{ cleanup(); resolve(data); };
+      script.onerror = ()=>{ cleanup(); reject(new Error('script error')); };
+      script.src = APPS_SCRIPT_URL + '?' + qs;
+      document.head.appendChild(script);
+    });
+  }
+  function esc(s){ return String(s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  function teamAvgRating(team){
+    if(!team.members || !team.members.length) return 0;
+    return Math.round((team.members.reduce((a,m)=>a+(m.rating||0),0) / team.members.length) * 100) / 100;
+  }
+  function fmtDate(ts){ const d=new Date(ts); return d.toLocaleDateString('ru-RU')+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}); }
+  function fmtTime(t){ if(!t) return 'время не назначено'; const d=new Date(t); return isNaN(d.getTime()) ? t : d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}); }
+
+  async function loadTeams(){
+    try{
+      const data = await jsonp({action:'list'});
+      const map = {};
+      (data.teams||[]).forEach(t=>{ map[t.name] = t; });
+      teamsCache = map;
+      orderCache = data.order || [];
+      annCache = data.announcements || [];
+      bracketCache = data.bracket || null;
+      document.getElementById('dbBanner').classList.remove('show');
+    }catch(e){ document.getElementById('dbBanner').classList.add('show'); }
+    renderTeams();
+  }
+
+  function renderTeams(){
+    const list = document.getElementById('teamsList');
+    const select = document.getElementById('joinTeam');
+    const names = Object.keys(teamsCache).filter(n => n !== FREE_AGENTS_NAME);
+    document.getElementById('teamCount').textContent = 'команд: ' + names.length;
+    const currentVal = select.value;
+    select.innerHTML = '<option value="">— выбери команду —</option>' + names.map(name=>{
+      const t = teamsCache[name];
+      const lock = t.open === false ? ' 🔒' : '';
+      return '<option value="'+esc(name)+'">'+esc(t.name)+lock+' — '+(t.members?t.members.length:0)+' чел.</option>';
+    }).join('');
+    if(names.includes(currentVal)) select.value = currentVal;
+    recompute();
+    if(document.getElementById('page-bracket').classList.contains('active')) renderBracket();
+    if(document.getElementById('page-rosters').classList.contains('active')) renderRosters();
+    if(document.getElementById('page-announcements').classList.contains('active')) renderAnnouncements();
+    if(document.getElementById('page-veto').classList.contains('active')) renderVeto();
+    if(isAdmin && document.getElementById('page-admin').classList.contains('active')){ renderAdmin(); renderAdminAnn(); renderAdminBracket(); }
+  }
+
+  function rosterHtml(t){
+    return (t.members||[]).map(m=>'<div class="roster-row"><span class="rn">'+esc(m.nick)+'</span><span class="rm">lvl '+esc(m.faceitLvl||'—')+' · рейтинг '+(m.rating||0)+'</span></div>').join('');
+  }
+  function renderRosters(){
+    const names = Object.keys(teamsCache).filter(n => n !== FREE_AGENTS_NAME);
+    document.getElementById('rostersList').innerHTML = names.length ? names.map(name=>{
+      const t = teamsCache[name];
+      const logo = t.logoUrl ? '<img class="team-logo" src="'+esc(t.logoUrl)+'" alt="">' : '<div class="team-logo empty">нет</div>';
+      return '<div class="team-card"><div class="team-head">'+logo+'<div class="team-info"><div class="team-name">'+esc(t.name)+'</div><div class="team-meta">'+(t.members?t.members.length:0)+' участник(ов)</div></div></div><div class="roster">'+rosterHtml(t)+'</div></div>';
+    }).join('') : '<div class="empty-note">Пока нет зарегистрированных команд.</div>';
+  }
+
+  function renderAnnouncements(){
+    document.getElementById('announcementsList').innerHTML = annCache.length ? annCache.map(a=>{
+      return '<div class="team-card"><div class="team-meta" style="margin-bottom:6px">'+fmtDate(a.ts)+'</div><div>'+esc(a.text).replace(/\n/g,'<br>')+'</div></div>';
+    }).join('') : '<div class="empty-note">Анонсов пока нет.</div>';
+  }
+  function renderAdminAnn(){
+    const box = document.getElementById('adminAnnList');
+    box.innerHTML = annCache.length ? annCache.map(a=>'<div class="order-row"><span class="name">'+esc(a.text)+'</span><button type="button" data-del="'+a.ts+'">✕</button></div>').join('') : '<div class="empty-note">Анонсов пока нет.</div>';
+    box.querySelectorAll('button').forEach(b=>{
+      b.addEventListener('click', async ()=>{ try{ await jsonp({action:'deleteAnnouncement', ts:b.getAttribute('data-del'), adminKey: ADMIN_PASSWORD}); loadTeams(); }catch(e){} });
+    });
+  }
+  document.getElementById('addAnnBtn').addEventListener('click', async ()=>{
+    const text = document.getElementById('annText').value.trim();
+    const errEl = document.getElementById('annErr');
+    errEl.classList.remove('show');
+    if(!text){ errEl.textContent = 'Введи текст анонса.'; errEl.classList.add('show'); return; }
+    try{
+      const res = await jsonp({action:'addAnnouncement', text, adminKey: ADMIN_PASSWORD});
+      if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
+      document.getElementById('annText').value = ''; loadTeams();
+    }catch(e){ errEl.textContent = 'Не удалось опубликовать.'; errEl.classList.add('show'); }
+  });
+
+  // ---------- bracket (public) ----------
+  function labelForRound(i, total){
+    const fromEnd = total - i;
+    if(fromEnd === 1) return 'Финал';
+    if(fromEnd === 2) return 'Полуфинал';
+    if(fromEnd === 3) return 'Четвертьфинал';
+    return 'Раунд ' + (i+1);
+  }
+  function renderBracket(){
+    const root = document.getElementById('bracketRoot');
+    if(!bracketCache){ root.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована организатором.</div>'; return; }
+    root.innerHTML = bracketCache.rounds.map((round,i)=>{
+      const matches = round.map(m=>{
+        const a = m.teamA ? '<div class="t'+(m.winner===m.teamA?' win':'')+'">'+esc(m.teamA)+(m.winner===m.teamA?' ✓':'')+'</div>' : '<div class="t tbd">TBD</div>';
+        const b = m.teamB ? '<div class="t'+(m.winner===m.teamB?' win':'')+'">'+esc(m.teamB)+(m.winner===m.teamB?' ✓':'')+'</div>' : '<div class="t tbd">TBD</div>';
+        return '<div class="match">'+a+b+'<div class="meta">'+m.format.toUpperCase()+' · '+fmtTime(m.time)+'</div></div>';
+      }).join('');
+      return '<div class="round"><div class="round-title">'+labelForRound(i, bracketCache.rounds.length)+'</div>'+matches+'</div>';
+    }).join('');
+  }
+
+  // ---------- veto (public + captain actions) ----------
+  function renderVeto(){
+    const box = document.getElementById('vetoList');
+    if(!bracketCache){ box.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована.</div>'; return; }
+    const session = getSession();
+    const allMatches = bracketCache.rounds.flat().filter(m => m.teamA && m.teamB);
+    if(!allMatches.length){ box.innerHTML = '<div class="empty-note">Пока нет определённых пар для матчей.</div>'; return; }
+
+    box.innerHTML = allMatches.map(m=>{
+      const seq = m.format === 'bo5' ? ['ban','ban','pick','pick','pick','pick'] : ['ban','ban','ban','ban','pick','pick'];
+      const step = m.veto.log.length;
+      const finished = step >= seq.length || m.veto.decider;
+      const notScheduled = !m.time;
+      const opensAt = m.time ? new Date(m.time).getTime() - 24*60*60*1000 : null;
+      const notOpenYet = opensAt && Date.now() < opensAt;
+
+      let statusHtml;
+      if(notScheduled) statusHtml = '<div class="hint">Время матча ещё не назначено — пики и баны недоступны.</div>';
+      else if(notOpenYet) statusHtml = '<div class="hint">Откроется '+fmtTime(new Date(opensAt).toISOString())+'.</div>';
+      else if(finished) statusHtml = '<div class="hint">Пики и баны завершены. Решающая карта: <b>'+esc(m.veto.decider||'—')+'</b></div>';
+      else {
+        const teamKey = step % 2 === 0 ? 'teamA' : 'teamB';
+        const turnTeam = m[teamKey];
+        const canAct = session && session.teamName === turnTeam;
+        statusHtml = '<div class="hint">Сейчас ход команды «'+esc(turnTeam)+'» — действие: '+seq[step]+(canAct?'':' (голосует капитан этой команды)')+'</div>' +
+          '<div class="map-grid" data-match="'+m.id+'">' + MAP_POOL.map(mapName=>{
+            const gone = m.veto.maps.indexOf(mapName) === -1;
+            return '<button type="button" class="map-chip'+(gone?' gone':'')+'" '+(gone||!canAct?'disabled':'')+' data-map="'+mapName+'" data-match="'+m.id+'" data-action="'+seq[step]+'">'+mapName+'</button>';
+          }).join('') + '</div>' +
+          (!session ? '<div class="hint">Войди под логином капитана, чтобы голосовать.</div>' : '');
+      }
+
+      const log = m.veto.log.map(l=>'<div>'+esc(l.teamName)+' — '+(l.action==='ban'?'забанил(а)':'выбрал(а)')+' '+esc(l.map)+'</div>').join('');
+
+      return '<div class="admin-match"><div class="mt">'+esc(m.teamA)+' vs '+esc(m.teamB)+' · '+m.format.toUpperCase()+' · '+fmtTime(m.time)+'</div>'+
+        statusHtml + (log ? '<div class="veto-log">'+log+'</div>' : '') + '</div>';
+    }).join('');
+
+    box.querySelectorAll('.map-chip').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        const s = getSession();
+        if(!s){ return; }
+        btn.disabled = true;
+        try{
+          const res = await jsonp({action:'vetoAction', matchId: btn.getAttribute('data-match'), mapName: btn.getAttribute('data-map'),
+            actionType: btn.getAttribute('data-action'), login: s.login, password: sessionStorage.getItem('cs2_pw') || ''});
+          if(res.error){ alert(res.error); }
+          loadTeams();
+        }catch(e){ alert('Не удалось отправить голос — проверь соединение.'); }
+      });
+    });
+  }
+
+  // ---------- admin: teams ----------
+  function renderAdmin(){
+    if(!isAdmin) return;
+    const names = Object.keys(teamsCache).filter(n => n !== FREE_AGENTS_NAME);
+    document.getElementById('adminTeamsList').innerHTML = names.length ? names.map(name=>{
+      const t = teamsCache[name];
+      return '<div class="team-card"><div class="team-name" style="margin-bottom:6px">'+esc(t.name)+'</div>'+rosterHtml(t)+'</div>';
+    }).join('') : '<div class="empty-note">Нет команд.</div>';
+    localOrder = orderCache.filter(n => names.includes(n)).concat(names.filter(n => !orderCache.includes(n)));
+    renderOrderList();
+  }
+  function renderOrderList(){
+    const box = document.getElementById('orderList');
+    box.innerHTML = localOrder.map((name,i)=>'<div class="order-row"><button type="button" data-move="up" data-i="'+i+'">▲</button><button type="button" data-move="down" data-i="'+i+'">▼</button><span class="name">'+esc(name)+'</span></div>').join('');
+    box.querySelectorAll('button').forEach(b=>{
+      b.addEventListener('click', ()=>{
+        const i = parseInt(b.getAttribute('data-i'),10);
+        const j = b.getAttribute('data-move') === 'up' ? i-1 : i+1;
+        if(j < 0 || j >= localOrder.length) return;
+        const tmp = localOrder[i]; localOrder[i] = localOrder[j]; localOrder[j] = tmp;
+        renderOrderList();
+      });
+    });
+  }
+  document.getElementById('saveOrderBtn').addEventListener('click', async ()=>{
+    const errEl = document.getElementById('orderErr'); errEl.classList.remove('show');
+    try{
+      const res = await jsonp({action:'saveOrder', order: JSON.stringify(localOrder), adminKey: ADMIN_PASSWORD});
+      if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
+      orderCache = localOrder.slice();
+    }catch(e){ errEl.textContent = 'Не удалось сохранить.'; errEl.classList.add('show'); }
+  });
+
+  // ---------- admin: bracket ----------
+  document.getElementById('genBracketBtn').addEventListener('click', async ()=>{
+    const errEl = document.getElementById('genErr'); errEl.classList.remove('show');
+    if(!confirm('Пересоздать сетку? Уже проведённые матчи и результаты будут сброшены.')) return;
+    try{
+      const res = await jsonp({action:'generateBracket', adminKey: ADMIN_PASSWORD});
+      if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
+      loadTeams();
+    }catch(e){ errEl.textContent = 'Не удалось сгенерировать.'; errEl.classList.add('show'); }
+  });
+  function renderAdminBracket(){
+    const box = document.getElementById('adminBracketList');
+    if(!bracketCache){ box.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована.</div>'; return; }
+    box.innerHTML = bracketCache.rounds.flat().map(m=>{
+      const winBtns = (m.teamA && m.teamB) ? [m.teamA, m.teamB].map(tn=>{
+        const active = m.winner === tn;
+        return '<button type="button" class="mini-btn" data-winmatch="'+m.id+'" data-winteam="'+esc(tn)+'" style="'+(active?'border-color:var(--accent);color:var(--accent)':'')+'">Победитель: '+esc(tn)+'</button>';
+      }).join(' ') : '<span class="hint">Команды ещё не определены</span>';
+      return '<div class="admin-match"><div class="mt">'+esc(m.teamA||'TBD')+' vs '+esc(m.teamB||'TBD')+' · '+m.format.toUpperCase()+'</div>'+
+        '<div class="field"><label>Время матча</label><input type="datetime-local" data-timematch="'+m.id+'" value="'+(m.time||'')+'"></div>'+
+        '<div class="field-row">'+winBtns+'</div></div>';
+    }).join('');
+    box.querySelectorAll('[data-timematch]').forEach(inp=>{
+      inp.addEventListener('change', async ()=>{
+        try{ await jsonp({action:'setMatchTime', matchId: inp.getAttribute('data-timematch'), time: inp.value, adminKey: ADMIN_PASSWORD}); loadTeams(); }catch(e){}
+      });
+    });
+    box.querySelectorAll('[data-winmatch]').forEach(btn=>{
+      btn.addEventListener('click', async ()=>{
+        try{ await jsonp({action:'setWinner', matchId: btn.getAttribute('data-winmatch'), winner: btn.getAttribute('data-winteam'), adminKey: ADMIN_PASSWORD}); loadTeams(); }catch(e){}
+      });
+    });
+  }
+
+  function computeRating(){
+    const hours = parseFloat(document.getElementById('pHours').value) || 0;
+    const lvlNone = document.querySelector('.none-btn[data-toggle="pFaceitLvl"]').classList.contains('active');
+    const lvlVal = parseFloat(document.getElementById('pFaceitLvl').value) || 0;
+    const premNone = document.querySelector('.none-btn[data-toggle="pPremier"]').classList.contains('active');
+    const premVal = parseFloat(document.getElementById('pPremier').value) || 0;
+    return Math.round((hours/1000 + (lvlNone?1:lvlVal/2) + (premNone?1:premVal/5)) * 100) / 100;
+  }
+  function showErr(msg){ const e = document.getElementById('formErr'); e.textContent = msg; e.classList.add('show'); }
+  function clearErr(){ document.getElementById('formErr').classList.remove('show'); }
+
+  form.addEventListener('submit', async function(e){
+    e.preventDefault();
+    clearErr();
+    const hasTeam = val('hasTeam');
+    if(!hasTeam){ showErr('Ответь на вопрос 1.'); return; }
+    const role = hasTeam === 'yes' ? val('role') : '';
+    if(hasTeam === 'yes' && !role){ showErr('Выбери, капитан ты или участник.'); return; }
+
+    let teamName='', teamLogo='', needMore='';
+    if(role === 'captain'){
+      teamName = document.getElementById('teamName').value.trim();
+      teamLogo = document.getElementById('teamLogo').value.trim();
+      needMore = val('needMore');
+      if(!teamName){ showErr('Укажи название команды.'); return; }
+      if(!needMore){ showErr('Ответь, нужны ли ещё участники.'); return; }
+      const dup = Object.values(teamsCache).some(t => t.name && t.name.toLowerCase() === teamName.toLowerCase());
+      if(dup){ showErr('Команда с таким названием уже зарегистрирована.'); return; }
+      if(needMore === 'no' && !document.getElementById('teamPassword').value.trim()){ showErr('Придумай пароль для команды.'); return; }
+    }
+    let selectedTeamId = '', joinPassword = '';
+    if(role === 'member'){
+      selectedTeamId = document.getElementById('joinTeam').value;
+      if(!selectedTeamId){ showErr('Выбери команду из списка.'); return; }
+      const t = teamsCache[selectedTeamId];
+      if(t && t.open === false){
+        joinPassword = document.getElementById('joinPassword').value;
+        if(!joinPassword){ showErr('Введи пароль команды.'); return; }
+      }
+    }
+    const pName = document.getElementById('pName').value.trim();
+    const pNick = document.getElementById('pNick').value.trim();
+    const pDiscord = document.getElementById('pDiscord').value.trim();
+    const pTelegram = document.getElementById('pTelegram').value.trim();
+    const pSteam = document.getElementById('pSteam').value.trim();
+    const pHours = document.getElementById('pHours').value;
+    const pLogin = document.getElementById('pLogin').value.trim();
+    const pPassword = document.getElementById('pPassword').value;
+    if(!pName || !pNick || !pDiscord || !pTelegram || !pSteam || pHours === '' || !pLogin || !pPassword){ showErr('Заполни все обязательные поля анкеты.'); return; }
+
+    const rating = computeRating();
+    const member = {
+      playerName: pName, nick: pNick, discord: pDiscord, telegram: pTelegram,
+      faceitLink: document.getElementById('pFaceitLink').disabled ? '' : document.getElementById('pFaceitLink').value.trim(),
+      faceitLvl: document.getElementById('pFaceitLvl').disabled ? '' : document.getElementById('pFaceitLvl').value,
+      hours: pHours, steam: pSteam, rating: rating, login: pLogin, password: pPassword
+    };
+    let payload;
+    if(role === 'captain'){
+      payload = Object.assign({action:'createTeam', teamName, logoUrl: teamLogo, open: needMore === 'yes' ? 'true' : 'false',
+        teamPass: needMore === 'no' ? document.getElementById('teamPassword').value.trim() : ''}, member);
+    } else if(role === 'member'){
+      payload = Object.assign({action:'joinTeam', teamName: selectedTeamId, teamPass: joinPassword, logoUrl:''}, member);
+    } else {
+      payload = Object.assign({action:'joinTeam', teamName: FREE_AGENTS_NAME, teamPass:'', logoUrl:''}, member);
+    }
+
+    const btn = document.getElementById('submitBtn');
+    btn.disabled = true;
+    try{
+      const result = await jsonp(payload);
+      if(result.error){ showErr(result.error); btn.disabled = false; return; }
+      document.getElementById('confirmText').textContent = 'Твой индивидуальный рейтинг: ' + rating + '.';
+      document.getElementById('confirmBox').classList.add('show');
+      form.reset();
+      document.querySelectorAll('.none-btn.active').forEach(b=>{ b.classList.remove('active'); document.getElementById(b.getAttribute('data-toggle')).disabled = false; });
+      sessionStorage.setItem('cs2_pw', pPassword);
+      setSession({login: pLogin, nick: pNick, teamName: role === 'captain' ? teamName : (role === 'member' ? selectedTeamId : '')});
+      recompute(); loadTeams();
+    }catch(err){ showErr('Не получилось сохранить заявку — проверь соединение и попробуй ещё раз.'); }
+    btn.disabled = false;
+  });
+
+  recompute();
+  renderSession();
+  loadTeams();
+  setInterval(loadTeams, 15000);
+})();
+</script>
+</body>
+</html>
