@@ -95,6 +95,9 @@ button.submit:disabled{opacity:.5;cursor:not-allowed}
 .match .t{padding:8px 10px;font-size:13px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between}
 .match .t:last-child{border-bottom:none}
 .match .t.tbd{color:var(--muted)}
+.match .t.empty{color:var(--muted);opacity:.5;font-style:italic}
+.slot-row{display:flex;gap:8px;margin-bottom:8px}
+.slot-row select{flex:1}
 .match .t.win{color:var(--accent)}
 .match .meta{font-size:11px;color:var(--muted);padding:4px 10px}
 .order-row{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);padding:10px 14px;margin-bottom:8px}
@@ -259,8 +262,11 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
   <div class="err" id="orderErr"></div>
 
   <div class="section-title" style="font-size:16px;margin-top:26px">Сетка турнира</div>
-  <div class="hint">Генерация построит сетку заново из порядка выше — уже проведённые матчи сотрутся.</div>
-  <button type="button" class="submit" id="genBracketBtn">Сгенерировать / пересоздать сетку</button>
+  <div class="hint">Слоты назначаешь сам: в каждом матче выбери команду, «TBD» или оставь пустым. Победитель по-прежнему сам проходит в следующий раунд. Пересоздание сотрёт все матчи и результаты.</div>
+  <div class="field" style="margin-top:12px"><label for="bracketSize">Размер сетки (слотов в первом раунде)</label>
+    <select id="bracketSize"><option value="2">2</option><option value="4">4</option><option value="8" selected>8</option><option value="16">16</option><option value="32">32</option></select></div>
+  <button type="button" class="submit" id="genBracketBtn">Создать пустую сетку</button>
+  <button type="button" class="submit" id="genFillBtn" style="margin-top:8px;background:var(--panel2);color:var(--text);border:1px solid var(--line)">Создать и заполнить первый раунд из порядка команд</button>
   <div class="err" id="genErr"></div>
   <div id="adminBracketList" style="margin-top:16px"></div>
 </section></div></div>
@@ -468,10 +474,17 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
   function renderBracket(){
     const root = document.getElementById('bracketRoot');
     if(!bracketCache){ root.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована организатором.</div>'; return; }
+    // null = слот не назначен («—»), 'TBD' = админ явно поставил TBD, иначе название команды
+    function slotHtml(m, name){
+      if(!name) return '<div class="t empty">—</div>';
+      if(name === 'TBD') return '<div class="t tbd">TBD</div>';
+      const w = m.winner === name;
+      return '<div class="t'+(w?' win':'')+'">'+esc(name)+(w?' ✓':'')+'</div>';
+    }
     root.innerHTML = bracketCache.rounds.map((round,i)=>{
       const matches = round.map(m=>{
-        const a = m.teamA ? '<div class="t'+(m.winner===m.teamA?' win':'')+'">'+esc(m.teamA)+(m.winner===m.teamA?' ✓':'')+'</div>' : '<div class="t tbd">TBD</div>';
-        const b = m.teamB ? '<div class="t'+(m.winner===m.teamB?' win':'')+'">'+esc(m.teamB)+(m.winner===m.teamB?' ✓':'')+'</div>' : '<div class="t tbd">TBD</div>';
+        const a = slotHtml(m, m.teamA);
+        const b = slotHtml(m, m.teamB);
         return '<div class="match">'+a+b+'<div class="meta">'+m.format.toUpperCase()+' · '+fmtTime(m.time)+'</div></div>';
       }).join('');
       return '<div class="round"><div class="round-title">'+labelForRound(i, bracketCache.rounds.length)+'</div>'+matches+'</div>';
@@ -483,7 +496,7 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
     const box = document.getElementById('vetoList');
     if(!bracketCache){ box.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована.</div>'; return; }
     const session = getSession();
-    const allMatches = bracketCache.rounds.flat().filter(m => m.teamA && m.teamB);
+    const allMatches = bracketCache.rounds.flat().filter(m => m.teamA && m.teamB && m.teamA !== 'TBD' && m.teamB !== 'TBD');
     if(!allMatches.length){ box.innerHTML = '<div class="empty-note">Пока нет определённых пар для матчей.</div>'; return; }
 
     box.innerHTML = allMatches.map(m=>{
@@ -565,35 +578,68 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
   });
 
   // ---------- admin: bracket ----------
-  document.getElementById('genBracketBtn').addEventListener('click', async ()=>{
+  async function generateBracket(fill){
     const errEl = document.getElementById('genErr'); errEl.classList.remove('show');
-    if(!confirm('Пересоздать сетку? Уже проведённые матчи и результаты будут сброшены.')) return;
+    if(bracketCache && !confirm('Пересоздать сетку? Все матчи, слоты и результаты будут сброшены.')) return;
     try{
-      const res = await jsonp({action:'generateBracket', adminKey: ADMIN_PASSWORD});
+      const res = await jsonp({action:'generateBracket', size: document.getElementById('bracketSize').value, fill: fill ? 'true' : 'false', adminKey: ADMIN_PASSWORD});
       if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
       loadTeams();
     }catch(e){ errEl.textContent = 'Не удалось сгенерировать.'; errEl.classList.add('show'); }
-  });
+  }
+  document.getElementById('genBracketBtn').addEventListener('click', ()=> generateBracket(false));
+  document.getElementById('genFillBtn').addEventListener('click', ()=> generateBracket(true));
+
+  function slotSelect(m, slot){
+    const cur = slot === 'A' ? m.teamA : m.teamB;
+    const names = Object.keys(teamsCache).filter(n => n !== FREE_AGENTS_NAME);
+    const opts = ['<option value=""'+(!cur?' selected':'')+'>— пусто —</option>',
+                  '<option value="TBD"'+(cur==='TBD'?' selected':'')+'>TBD</option>']
+      .concat(names.map(n=>'<option value="'+esc(n)+'"'+(cur===n?' selected':'')+'>'+esc(n)+'</option>')).join('');
+    return '<select data-slotmatch="'+m.id+'" data-slot="'+slot+'">'+opts+'</select>';
+  }
   function renderAdminBracket(){
     const box = document.getElementById('adminBracketList');
-    if(!bracketCache){ box.innerHTML = '<div class="empty-note">Сетка ещё не сгенерирована.</div>'; return; }
-    box.innerHTML = bracketCache.rounds.flat().map(m=>{
-      const winBtns = (m.teamA && m.teamB) ? [m.teamA, m.teamB].map(tn=>{
-        const active = m.winner === tn;
-        return '<button type="button" class="mini-btn" data-winmatch="'+m.id+'" data-winteam="'+esc(tn)+'" style="'+(active?'border-color:var(--accent);color:var(--accent)':'')+'">Победитель: '+esc(tn)+'</button>';
-      }).join(' ') : '<span class="hint">Команды ещё не определены</span>';
-      return '<div class="admin-match"><div class="mt">'+esc(m.teamA||'TBD')+' vs '+esc(m.teamB||'TBD')+' · '+m.format.toUpperCase()+'</div>'+
-        '<div class="field"><label>Время матча</label><input type="datetime-local" data-timematch="'+m.id+'" value="'+(m.time||'')+'"></div>'+
-        '<div class="field-row">'+winBtns+'</div></div>';
+    if(!bracketCache){ box.innerHTML = '<div class="empty-note">Сетка ещё не создана.</div>'; return; }
+    // не перерисовываем список, пока админ держит фокус в поле/списке — иначе автообновление собьёт ввод
+    const ae = document.activeElement;
+    if(ae && box.contains(ae)) return;
+    box.innerHTML = bracketCache.rounds.map((round,ri)=>{
+      return '<div class="section-title" style="font-size:14px;margin:16px 0 8px">'+labelForRound(ri, bracketCache.rounds.length)+'</div>' +
+        round.map(m=>{
+          const real = m.teamA && m.teamB && m.teamA !== 'TBD' && m.teamB !== 'TBD';
+          const winBtns = real ? [m.teamA, m.teamB].map(tn=>{
+            const active = m.winner === tn;
+            return '<button type="button" class="mini-btn" data-winmatch="'+m.id+'" data-winteam="'+esc(tn)+'" style="'+(active?'border-color:var(--accent);color:var(--accent)':'')+'">Победитель: '+esc(tn)+'</button>';
+          }).join(' ') + (m.winner ? ' <button type="button" class="mini-btn" data-winmatch="'+m.id+'" data-winteam="">Сбросить</button>' : '')
+            : '<span class="hint">Победителя можно выбрать, когда в обоих слотах стоят команды</span>';
+          return '<div class="admin-match"><div class="mt">'+m.format.toUpperCase()+'</div>'+
+            '<div class="slot-row">'+slotSelect(m,'A')+slotSelect(m,'B')+'</div>'+
+            '<div class="field"><label>Время матча</label><input type="datetime-local" data-timematch="'+m.id+'" value="'+(m.time||'')+'"></div>'+
+            '<div class="field-row" style="flex-wrap:wrap">'+winBtns+'</div></div>';
+        }).join('');
     }).join('');
+    box.querySelectorAll('[data-slotmatch]').forEach(sel=>{
+      sel.addEventListener('change', async ()=>{
+        try{
+          const res = await jsonp({action:'setSlot', matchId: sel.getAttribute('data-slotmatch'), slot: sel.getAttribute('data-slot'), team: sel.value, adminKey: ADMIN_PASSWORD});
+          if(res.error) alert(res.error);
+          sel.blur(); loadTeams();
+        }catch(e){ alert('Не удалось назначить слот — проверь соединение.'); }
+      });
+    });
     box.querySelectorAll('[data-timematch]').forEach(inp=>{
       inp.addEventListener('change', async ()=>{
-        try{ await jsonp({action:'setMatchTime', matchId: inp.getAttribute('data-timematch'), time: inp.value, adminKey: ADMIN_PASSWORD}); loadTeams(); }catch(e){}
+        try{ await jsonp({action:'setMatchTime', matchId: inp.getAttribute('data-timematch'), time: inp.value, adminKey: ADMIN_PASSWORD}); inp.blur(); loadTeams(); }catch(e){}
       });
     });
     box.querySelectorAll('[data-winmatch]').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
-        try{ await jsonp({action:'setWinner', matchId: btn.getAttribute('data-winmatch'), winner: btn.getAttribute('data-winteam'), adminKey: ADMIN_PASSWORD}); loadTeams(); }catch(e){}
+        try{
+          const res = await jsonp({action:'setWinner', matchId: btn.getAttribute('data-winmatch'), winner: btn.getAttribute('data-winteam'), adminKey: ADMIN_PASSWORD});
+          if(res.error) alert(res.error);
+          btn.blur(); loadTeams();
+        }catch(e){ alert('Не удалось сохранить победителя — проверь соединение.'); }
       });
     });
   }
