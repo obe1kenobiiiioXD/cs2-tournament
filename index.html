@@ -429,7 +429,7 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
   }
 
   function rosterHtml(t){
-    return (t.members||[]).map(m=>'<div class="roster-row"><span class="rn">'+esc(m.nick)+'</span><span class="rm">lvl '+esc(m.faceitLvl||'—')+' · рейтинг '+(m.rating||0)+'</span></div>').join('');
+    return (t.members||[]).map(m=>'<div class="roster-row"><span class="rn">'+esc(m.nick)+(m.isCaptain?' <span class="cap-badge">👑 Капитан</span>':'')+'</span><span class="rm">lvl '+esc(m.faceitLvl||'—')+' · рейтинг '+(m.rating||0)+'</span></div>').join('');
   }
   function renderRosters(){
     const names = Object.keys(teamsCache).filter(n => n !== FREE_AGENTS_NAME);
