@@ -116,6 +116,7 @@ button.submit:disabled{opacity:.5;cursor:not-allowed}
 .veto-log div{padding:3px 0}
 footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;color:var(--muted);font-size:12px;text-align:center}
 @media(max-width:480px){.choice-row{flex-direction:column}.field-row{flex-direction:column}}
+.cap-badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;background:rgba(255,184,0,.15);color:#ffb800;font-size:.72em;font-weight:600;letter-spacing:.03em;vertical-align:middle}
 </style>
 </head>
 <body>
@@ -299,7 +300,7 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
     const banner = document.getElementById('sessionBanner');
     if(s){
       banner.classList.add('show');
-      document.getElementById('sessionText').textContent = 'Ты вошёл как ' + s.nick + (s.teamName ? ' · команда: ' + s.teamName : '');
+      document.getElementById('sessionText').textContent = 'Ты вошёл как ' + s.nick + (s.teamName ? ' · команда: ' + s.teamName : '') + (s.role==='captain' ? ' · 👑 Капитан' : '');
       document.getElementById('formSection').style.display = 'none';
     } else {
       banner.classList.remove('show');
@@ -323,7 +324,7 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
       const res = await jsonp({action:'login', login, password});
       if(res.error){ errEl.textContent = res.error; errEl.classList.add('show'); return; }
       sessionStorage.setItem('cs2_pw', password);
-      setSession({login, nick: res.nick, teamName: res.teamName});
+      setSession({login, nick: res.nick, teamName: res.teamName, role: res.role});
       document.getElementById('loginPanel').classList.remove('show');
     }catch(e){ errEl.textContent = 'Не удалось войти.'; errEl.classList.add('show'); }
   });
@@ -721,7 +722,7 @@ footer{padding:26px 0 44px;border-top:1px solid var(--line);margin-top:10px;colo
       form.reset();
       document.querySelectorAll('.none-btn.active').forEach(b=>{ b.classList.remove('active'); document.getElementById(b.getAttribute('data-toggle')).disabled = false; });
       sessionStorage.setItem('cs2_pw', pPassword);
-      setSession({login: pLogin, nick: pNick, teamName: role === 'captain' ? teamName : (role === 'member' ? selectedTeamId : '')});
+      setSession({login: pLogin, nick: pNick, teamName: role === 'captain' ? teamName : (role === 'member' ? selectedTeamId : ''), role: role});
       recompute(); loadTeams();
     }catch(err){ showErr('Не получилось сохранить заявку — проверь соединение и попробуй ещё раз.'); }
     btn.disabled = false;
