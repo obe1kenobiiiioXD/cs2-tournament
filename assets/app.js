@@ -35,6 +35,7 @@
     lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
     menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
     ext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>',
+    share: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/></svg>',
   };
 
   function avatar(p, cls = '') {
@@ -75,6 +76,62 @@
     if (left === 1) return 'Полуфинал';
     if (left === 2) return 'Четвертьфинал';
     return '1/' + 2 ** left + ' финала';
+  }
+  const FORMATS = { single: 'Олимпийская система', double: 'Двойное выбывание', groups: 'Группы + плей-офф' };
+  const fmtName = t => FORMATS[t.format || 'single'];
+  const groupLetter = n => String.fromCharCode(64 + n);
+  // название матча с учётом вида сетки
+  function matchName(m, matches) {
+    const br = m.bracket || 'upper';
+    if (br === 'group') return `Группа ${groupLetter(m.group_no)} · Тур ${m.round}`;
+    if (br === 'grand') return 'Гранд-финал';
+    const total = Math.max(...matches.filter(x => (x.bracket || 'upper') === br).map(x => x.round));
+    if (br === 'lower') return m.round === total ? 'Финал нижней сетки' : `Нижняя сетка · Раунд ${m.round}`;
+    if (matches.some(x => x.bracket === 'lower')) return m.round === total ? 'Финал верхней сетки' : m.round === total - 1 ? 'Полуфинал верхней сетки' : `Верхняя сетка · Раунд ${m.round}`;
+    return roundName(m.round, total);
+  }
+  const finalMatch = matches => matches.find(m => m.bracket !== 'group' && !m.next_match_id);
+  // живые таймеры: элементы с data-countdown обновляются раз в секунду
+  function cdText(iso) {
+    let s = Math.round((new Date(iso) - Date.now()) / 1000);
+    if (s <= 0) return 'уже началось';
+    const d = Math.floor(s / 86400); s %= 86400;
+    const h = Math.floor(s / 3600); s %= 3600;
+    const mi = Math.floor(s / 60), se = s % 60;
+    const p = n => String(n).padStart(2, '0');
+    return d ? `${d} д ${p(h)}:${p(mi)}` : h ? `${h}:${p(mi)}:${p(se)}` : `${p(mi)}:${p(se)}`;
+  }
+  const countdown = iso => `<span class="cd" data-countdown="${esc(iso)}">${cdText(iso)}</span>`;
+  setInterval(() => $$('[data-countdown]').forEach(el => { el.textContent = cdText(el.dataset.countdown); }), 1000);
+  const setTitle = s => { document.title = s ? `${s} — Organizm` : 'Organizm — турниры по CS2'; };
+  const checkinOpen = t => !!t.checkin_minutes && ['registration', 'closed'].includes(t.stage) && Date.now() >= new Date(t.starts_at) - t.checkin_minutes * 6e4;
+  const skeleton = (n = 6) => `<div class="tgrid">${Array(n).fill('<div class="tcard sk"><div class="ban"></div><div class="body"><i></i><i></i><i class="s"></i></div></div>').join('')}</div>`;
+  async function share(url, title) {
+    try { if (navigator.share && matchMedia('(pointer:coarse)').matches) { await navigator.share({ title, url }); return; } } catch (_) { return; }
+    try { await navigator.clipboard.writeText(url); toast('Ссылка скопирована'); } catch (_) { toast('Не удалось скопировать: ' + url, 'bad'); }
+  }
+  // поле картинки: ссылка или загрузка файла
+  function imgField(name, label, value, kind) {
+    return `<div class="field imgf" data-kind="${kind}"><label class="f">${label}</label>
+      <div class="imgrow"><span class="imgprev ${kind}">${value ? `<img src="${esc(value)}" alt="">` : ''}</span>
+      <div style="flex:1;min-width:0"><input type="url" name="${name}" value="${esc(value || '')}" placeholder="https://… или загрузите файл">
+      <div class="row" style="gap:8px;margin-top:6px"><label class="btn sm">Загрузить файл<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>${value ? '<button type="button" class="btn sm ghost" data-clear>Убрать</button>' : ''}<span class="hint" style="margin:0" data-st></span></div></div></div></div>`;
+  }
+  function bindImgFields(root) {
+    $$('.imgf', root).forEach(box => {
+      const inp = $('input[type=url]', box), file = $('input[type=file]', box), prev = $('.imgprev', box), st = $('[data-st]', box);
+      const show = v => { prev.innerHTML = v ? `<img src="${esc(v)}" alt="">` : ''; };
+      inp.oninput = () => show(inp.value.trim());
+      const clr = $('[data-clear]', box); if (clr) clr.onclick = () => { inp.value = ''; show(''); };
+      file.onchange = async () => {
+        const f = file.files[0]; if (!f) return;
+        st.textContent = 'Загружаю…';
+        const url = await act(() => api.uploadImage(f, box.dataset.kind));
+        st.textContent = '';
+        file.value = '';
+        if (url) { inp.value = url; show(url); toast('Картинка загружена'); }
+      };
+    });
   }
 
   // =================== уведомления и диалоги ===================
@@ -138,7 +195,7 @@
       $('#loginBtn').onclick = () => api.login();
     } else {
       ua.innerHTML = `<div class="me-btn" id="meBtn" tabindex="0">${avatar(me)}<span class="nm">${esc(me.nickname)}</span>
-        <div class="menu" id="meMenu"><a href="#/me">Мой профиль</a><a href="#/me">Мои турниры и команды</a><a href="#/create">Создать турнир</a>${me.is_admin ? '<a href="#/admin">Модерация</a>' : ''}<hr><button id="logoutBtn">Выйти</button></div></div>`;
+        <div class="menu" id="meMenu"><a href="#/me">Мой профиль</a><a href="#/">Мои матчи</a><a href="#/rating">Рейтинг</a><a href="#/create">Создать турнир</a>${me.is_admin ? '<a href="#/admin">Модерация</a>' : ''}<hr><button id="logoutBtn">Выйти</button></div></div>`;
       const menu = $('#meMenu');
       $('#meBtn').onclick = e => { e.stopPropagation(); menu.classList.toggle('open'); };
       $('#logoutBtn').onclick = async () => { await api.logout(); toast('Вы вышли'); render(); };
@@ -163,6 +220,7 @@
         </div>
         <div class="stats" id="stats"><div><b>—</b><span>турниров</span></div><div><b>—</b><span>команд</span></div><div><b>—</b><span>игроков</span></div></div>
       </div></section>
+      <section class="section dash hidden" id="dash"><div class="wrap" id="dashIn"></div></section>
       <section class="section" id="list"><div class="wrap">
         <div class="filters">
           <div class="search">${I.search}<input type="search" id="q" placeholder="Название турнира или организатор" value="${esc(homeState.q)}"></div>
@@ -171,9 +229,11 @@
           </div>
           <select id="fmode"><option value="">Любой формат</option><option value="5v5">5 на 5</option><option value="2v2">2 на 2</option><option value="1v1">1 на 1</option></select>
         </div>
-        <div id="grid"><div class="loader">Загружаю турниры…</div></div>
+        <div id="grid">${skeleton()}</div>
       </div></section>`;
+    setTitle('');
     $('#toList').onclick = e => { e.preventDefault(); $('#list').scrollIntoView(); };
+    if (api.me) drawDashboard();
     $('#fmode').value = homeState.mode;
     api.stats().then(s => { const b = $$('#stats b'); if (b.length) { b[0].textContent = s.tournaments; b[1].textContent = s.teams; b[2].textContent = s.players; } }).catch(() => {});
     let list = [];
@@ -214,11 +274,61 @@
     </a>`;
   }
 
+  // «Мои матчи»: приглашения, чек-ин и ближайшие игры
+  async function drawDashboard() {
+    const d = await api.myDashboard().catch(() => null);
+    const box = $('#dashIn'); if (!box || !d) return;
+    const items = [];
+    for (const i of d.invites) items.push(`<div class="dcard inv">${teamLogo(i.team)}<div class="grow"><div class="kicker">Приглашение в команду</div><b>${esc(i.team.name)}</b><span>${esc(i.tournament.title)} · ${esc(fmtDate(i.tournament.starts_at))}</span></div>
+      <div class="row" style="gap:8px"><button class="btn sm pri" data-inv-yes="${esc(i.team_id)}">Принять</button><button class="btn sm ghost" data-inv-no="${esc(i.team_id)}">Отклонить</button></div></div>`);
+    for (const c of d.checkins) {
+      const t = c.tournament, opensAt = new Date(new Date(t.starts_at) - t.checkin_minutes * 6e4).toISOString();
+      let right;
+      if (c.team.checked_in_at) right = '<span class="badge reg">✓ Участие подтверждено</span>';
+      else if (!checkinOpen(t)) right = `<span class="hint" style="margin:0">Чек-ин через ${countdown(opensAt)}</span>`;
+      else right = c.captain ? `<button class="btn sm pri" data-checkin="${esc(c.team.id)}">Подтвердить участие</button>` : '<span class="hint" style="margin:0">Ждём подтверждения капитана</span>';
+      items.push(`<div class="dcard ${!c.team.checked_in_at && checkinOpen(t) ? 'hot' : ''}">${teamLogo(c.team)}<div class="grow"><div class="kicker">Чек-ин · старт через ${countdown(t.starts_at)}</div><b><a href="#/t/${esc(t.id)}/teams">${esc(t.title)}</a></b><span>${esc(c.team.name)}</span></div>${right}</div>`);
+    }
+    for (const m of d.matches.slice(0, 6)) {
+      const op = m.mine === m.team_a ? m.B : m.A, my = m.mine === m.team_a ? m.A : m.B;
+      const when = m.status === 'live' ? '<span class="badge live">Идёт</span>' : m.scheduled_at ? (new Date(m.scheduled_at) > Date.now() ? `через ${countdown(m.scheduled_at)}` : esc(fmtDate(m.scheduled_at))) : 'время не назначено';
+      items.push(`<a class="dcard ${m.status === 'live' ? 'hot' : ''}" href="#/t/${esc(m.tournament_id)}/m/${esc(m.id)}">${teamLogo(my)}<div class="grow"><div class="kicker">${esc(m.tournament ? m.tournament.title : 'Матч')} · Bo${m.best_of}</div><b>${esc(my ? my.name : '')} <span class="vs">vs</span> ${esc(op ? op.name : 'TBD')}</b><span>${when}</span></div>${teamLogo(op)}</a>`);
+    }
+    if (!items.length) return;
+    $('#dash').classList.remove('hidden');
+    box.innerHTML = `<div class="sec-head" style="margin-bottom:14px"><div><h2>Мои матчи</h2><div class="sub">Приглашения, чек-ин и ближайшие игры ваших команд</div></div></div><div class="dgrid">${items.join('')}</div>`;
+    $$('[data-inv-yes]', box).forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invYes, true), 'Вы в команде!')) render(); });
+    $$('[data-inv-no]', box).forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invNo, false), 'Приглашение отклонено')) render(); });
+    $$('[data-checkin]', box).forEach(b => b.onclick = async () => { if (await act(() => api.checkin(b.dataset.checkin), 'Участие подтверждено')) render(); });
+  }
+
+  // =================== рейтинг ===================
+  async function viewRating() {
+    setTitle('Рейтинг игроков');
+    app.innerHTML = `<div class="wrap section"><div class="sec-head"><div><h2>Рейтинг игроков</h2><div class="sub">По матчам опубликованных турниров: победа — 3 очка, выход в финал — ещё 3, титул — ещё 10</div></div>
+      <div class="search" style="max-width:300px">${I.search}<input type="search" id="rq" placeholder="Найти игрока"></div></div><div id="rbox"><div class="loader">Считаю рейтинг…</div></div></div>`;
+    const list = await api.leaderboard().catch(e => { $('#rbox').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return null; });
+    if (!list) return;
+    const draw = () => {
+      const q = $('#rq').value.trim().toLowerCase();
+      const rows = list.map((p, i) => ({ ...p, place: i + 1 })).filter(p => !q || p.nickname.toLowerCase().includes(q));
+      $('#rbox').innerHTML = !list.length ? '<div class="empty"><div class="head">Рейтинг пуст</div>Он появится после первых сыгранных матчей.</div>'
+        : !rows.length ? '<div class="empty">Никого не нашли</div>'
+        : `<div class="table-wrap"><table class="rtable"><thead><tr><th>#</th><th>Игрок</th><th>Очки</th><th class="hm">Матчи</th><th>Победы</th><th class="hm">% побед</th><th class="hm">Финалы</th><th>Титулы</th></tr></thead><tbody>
+          ${rows.map(p => `<tr class="${api.me && p.user_id === api.me.id ? 'me' : ''} ${p.place <= 3 ? 'top' + p.place : ''}"><td class="pl">${p.place}</td>
+            <td><a class="row" style="gap:10px;flex-wrap:nowrap" href="#/u/${esc(p.steam_id)}">${avatar(p, 'sm')}<b>${esc(p.nickname)}</b>${p.faceit_level ? `<span class="lvl l${p.faceit_level}">${p.faceit_level}</span>` : ''}</a></td>
+            <td class="pts">${p.points}</td><td class="hm">${p.matches}</td><td>${p.wins}</td><td class="hm">${p.matches ? Math.round(p.wins / p.matches * 100) : 0}%</td><td class="hm">${p.finals}</td><td>${p.titles ? '🏆 ' + p.titles : '—'}</td></tr>`).join('')}
+          </tbody></table></div>`;
+    };
+    $('#rq').oninput = draw;
+    draw();
+  }
+
   // =================== страница турнира ===================
   let tCache = null;
   async function viewTournament(id, tab, matchId) {
     const sameT = tCache && tCache.t.id === id;
-    if (!sameT) app.innerHTML = '<div class="loader">Загружаю турнир…</div>';
+    if (!sameT) app.innerHTML = '<section class="t-head sk"><div class="wrap in"><i></i><i class="l"></i><i class="s"></i></div></section>';
     let data;
     try { data = await api.getTournament(id); } catch (e) { app.innerHTML = `<div class="wrap section"><div class="notice bad">${esc(e.message)}</div></div>`; return; }
     if (!data) { app.innerHTML = `<div class="wrap section"><div class="empty"><div class="head">Турнир не найден</div>Возможно, он ещё на модерации или был удалён.<div style="margin-top:16px"><a class="btn" href="#/">К списку турниров</a></div></div></div>`; return; }
@@ -253,17 +363,19 @@
     if (tab !== 'manage' || canManage) tCache._tab = tab; else tab = 'overview';
     const tabs = [['overview', 'Обзор'], ['teams', t.mode === '1v1' ? 'Участники' : 'Команды', teams.length], ['bracket', 'Сетка'], ['matches', 'Матчи'], ['news', 'Анонсы', tCache.announcements.length]];
     if (canManage) tabs.push(['manage', 'Управление']);
-    const champion = t.stage === 'finished' && matches.length ? c.teamById[matches.filter(m => m.round === Math.max(...matches.map(x => x.round)))[0].winner_id] : null;
+    const fm = finalMatch(matches);
+    const champion = t.stage === 'finished' && fm && fm.winner_id ? c.teamById[fm.winner_id] : null;
     const scrollY = window.scrollY;
+    setTitle(t.title);
     app.innerHTML = `
       <section class="t-head"><div class="bg">${banner(t)}</div><div class="wrap in">
         <div class="t-top">
           <div>
-            <div class="row" style="gap:8px">${stageBadge(t)}<span class="badge">${esc(t.mode)}</span>${t.stage === 'registration' && t.reg_closes_at ? `<span class="badge">Регистрация до ${esc(fmtDate(t.reg_closes_at))}</span>` : ''}</div>
+            <div class="row" style="gap:8px">${stageBadge(t)}<span class="badge">${esc(t.mode)}</span><span class="badge">${esc(fmtName(t))}</span>${t.stage === 'registration' && t.reg_closes_at ? `<span class="badge">Регистрация до ${esc(fmtDate(t.reg_closes_at))}</span>` : ''}${t.checkin_minutes ? `<span class="badge">Чек-ин за ${t.checkin_minutes} мин</span>` : ''}<button class="btn sm ghost share" id="shareT" title="Поделиться ссылкой">${I.share}Поделиться</button></div>
             <h1>${esc(t.title)}</h1>
             <div class="org">Организатор: <a href="#/u/${esc(t.organizer_steam_id)}" class="row" style="gap:6px">${avatar({ avatar_url: t.organizer_avatar, nickname: t.organizer_nickname, steam_id: t.organizer_steam_id }, 'sm')}<b style="color:var(--text);font-weight:500">${esc(t.organizer_nickname)}</b></a></div>
             <div class="kfacts">
-              <div><span>Старт</span><b>${esc(fmtDate(t.starts_at))}</b></div>
+              <div><span>Старт</span><b>${['registration', 'closed'].includes(t.stage) && new Date(t.starts_at) > Date.now() ? `<span title="${esc(fmtDate(t.starts_at))}">через ${countdown(t.starts_at)}</span>` : esc(fmtDate(t.starts_at))}</b></div>
               <div><span>Призовой фонд</span><b>${esc(t.prize || '—')}</b></div>
               <div><span>${t.mode === '1v1' ? 'Игроки' : 'Команды'}</span><b>${teams.length} / ${t.max_teams}</b></div>
               <div><span>Матчи</span><b>${esc(boLabel(t))}</b></div>
@@ -295,19 +407,38 @@
     if (champion) return `<div class="card accent"><div class="kicker">Победитель</div><div class="row" style="margin-top:10px">${teamLogo(champion)}<b class="head" style="font-size:22px">${esc(champion.name)}</b></div></div>`;
     if (myTeam) {
       const my = matches.find(m => m.status !== 'finished' && (m.team_a === myTeam.id || m.team_b === myTeam.id) && m.team_a && m.team_b);
+      const cap = myTeam.captain_id === me.id;
+      let ci = '';
+      if (t.checkin_minutes && ['registration', 'closed'].includes(t.stage)) {
+        const opensAt = new Date(new Date(t.starts_at) - t.checkin_minutes * 6e4).toISOString();
+        ci = myTeam.checked_in_at ? '<div class="ci ok">✓ Участие подтверждено</div>'
+          : !checkinOpen(t) ? `<div class="ci">Чек-ин откроется через ${countdown(opensAt)}</div>`
+          : cap ? `<button class="btn pri block" data-checkin="${esc(myTeam.id)}" style="margin-bottom:8px">Подтвердить участие</button><div class="ci warn">Без чек-ина ${t.mode === '1v1' ? 'вы не попадёте' : 'команда не попадёт'} в сетку</div>`
+          : '<div class="ci warn">Чек-ин открыт — капитан должен подтвердить участие</div>';
+      }
       return `<div class="card accent"><div class="kicker">${t.mode === '1v1' ? 'Вы участвуете' : 'Ваша команда'}</div>
-        <div class="row" style="margin:10px 0 12px">${teamLogo(myTeam)}<div><b class="head" style="font-size:19px">${esc(myTeam.name)}</b><div class="sub" style="margin:0">${myTeam.captain_id === me.id ? 'Вы капитан' : 'Вы игрок'} · ${plural(myTeam.members.length, 'игрок', 'игрока', 'игроков')}</div></div></div>
+        <div class="row" style="margin:10px 0 12px">${teamLogo(myTeam)}<div><b class="head" style="font-size:19px">${esc(myTeam.name)}</b><div class="sub" style="margin:0">${cap ? 'Вы капитан' : 'Вы игрок'} · ${plural(myTeam.members.length, 'игрок', 'игрока', 'игроков')}</div></div></div>
+        ${ci}
         ${my ? `<a class="btn pri block" href="#/t/${esc(t.id)}/m/${esc(my.id)}">Ваш матч: vs ${esc((teamById[my.team_a === myTeam.id ? my.team_b : my.team_a] || {}).name)}</a>`
              : `<a class="btn block" href="#/t/${esc(t.id)}/teams">Открыть ${t.mode === '1v1' ? 'участников' : 'команду'}</a>`}</div>`;
     }
+    const myInv = me ? (tCache.invites || []).filter(i => i.user_id === me.id) : [];
+    if (myInv.length && regOpen(t)) {
+      return `<div class="card accent"><div class="kicker">Вас приглашают</div>${myInv.map(i => { const tm = teamById[i.team_id]; return tm ? `<div class="row" style="margin:10px 0">${teamLogo(tm, 'sm')}<b style="flex:1">${esc(tm.name)}</b><button class="btn sm pri" data-inv-yes="${esc(tm.id)}">Принять</button><button class="btn sm ghost" data-inv-no="${esc(tm.id)}">✕</button></div>` : ''; }).join('')}</div>`;
+    }
     if (regOpen(t)) {
       const full = c.teams.length >= t.max_teams;
+      const agent = me && (tCache.agents || []).find(a => a.user_id === me.id);
+      const faBtn = t.mode === '1v1' || !me ? '' : agent
+        ? `<div class="ci ok" style="margin-top:10px">Вы в списке свободных агентов — капитаны могут вас пригласить</div><button class="btn sm ghost block" data-fa-off>Убрать себя из списка</button>`
+        : `<button class="btn block ghost" data-fa-on style="margin-top:8px">${I.users}Ищу команду</button>`;
       if (!me) return `<div class="card"><b>Регистрация открыта</b><p class="sub" style="margin:4px 0 12px">Войдите через Steam, чтобы ${t.mode === '1v1' ? 'участвовать' : 'создать команду или вступить в неё'}.</p><button class="btn steam block" data-login>${I.steam}Войти через Steam</button></div>`;
-      if (full) return `<div class="card"><b>Мест нет</b><p class="sub" style="margin-top:4px">Все слоты заняты. Можно вступить в команду, где есть место.</p><button class="btn block" data-join-code style="margin-top:12px">Вступить по коду</button></div>`;
+      if (full) return `<div class="card"><b>Мест нет</b><p class="sub" style="margin-top:4px">Все слоты заняты. Можно вступить в команду, где есть место.</p>${t.mode === '1v1' ? '' : '<button class="btn block" data-join-code style="margin-top:12px">Вступить по коду</button>'}${faBtn}</div>`;
       if (t.mode === '1v1') return `<div class="card"><b>Регистрация открыта</b><p class="sub" style="margin:4px 0 12px">Свободно мест: ${t.max_teams - c.teams.length}</p><button class="btn pri block" data-solo>Участвовать</button></div>`;
       return `<div class="card"><b>Регистрация открыта</b><p class="sub" style="margin:4px 0 12px">Свободно мест: ${t.max_teams - c.teams.length}</p>
         <button class="btn pri block" data-create-team>${I.plus}Зарегистрировать команду</button>
         <button class="btn block" data-join-code style="margin-top:8px">Вступить по коду</button>
+        ${faBtn}
         <a class="hint" href="#/t/${esc(t.id)}/teams" style="display:block;text-align:center;margin-top:10px">или выберите открытую команду →</a></div>`;
     }
     if (t.stage === 'ongoing') return `<div class="card"><b>Турнир идёт</b><p class="sub" style="margin:4px 0 12px">Следите за сеткой и результатами в реальном времени.</p><a class="btn pri block" href="#/t/${esc(t.id)}/bracket">Открыть сетку</a></div>`;
@@ -319,14 +450,22 @@
     $$('[data-create-team]').forEach(b => b.onclick = () => createTeamDialog(t));
     $$('[data-join-code]').forEach(b => b.onclick = () => joinCodeDialog(t));
     $$('[data-solo]').forEach(b => b.onclick = async () => { if (await act(() => api.createTeam(t.id, { name: api.me.nickname, open: true }), 'Вы зарегистрированы!')) refreshT(); });
+    $$('.cta [data-checkin]').forEach(b => b.onclick = async () => { b.disabled = true; if (await act(() => api.checkin(b.dataset.checkin), 'Участие подтверждено')) refreshT(); else b.disabled = false; });
+    $$('.cta [data-inv-yes]').forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invYes, true), 'Вы в команде!')) refreshT(); });
+    $$('.cta [data-inv-no]').forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invNo, false), 'Приглашение отклонено')) refreshT(); });
+    $$('[data-fa-on]').forEach(b => b.onclick = () => form('Ищу команду', `<p class="sub" style="margin-bottom:14px">Вы появитесь в списке свободных агентов на вкладке «Команды». Капитаны смогут пригласить вас, а приглашение придёт на главную страницу.</p>
+      <div class="field"><label class="f">Пара слов о себе</label><input type="text" name="note" maxlength="140" placeholder="Роль, уровень, когда можете играть"></div>`, 'Встать в список',
+      async v => { if (!await act(() => api.setFreeAgent(t.id, v.note.trim()), 'Вы в списке свободных агентов')) return false; refreshT(); }));
+    $$('[data-fa-off]').forEach(b => b.onclick = async () => { if (await act(() => api.removeFreeAgent(t.id), 'Вы убраны из списка')) refreshT(); });
+    const sh = $('#shareT'); if (sh) sh.onclick = () => share(location.href.split('#')[0] + '#/t/' + t.id, t.title);
   }
   const refreshT = async () => { if (!tCache) return; const fresh = await api.getTournament(tCache.t.id); if (fresh) { tCache = fresh; const [, , c, d] = location.hash.replace(/^#\/?/, '').split('/'); drawTournament(c === 'm' ? (tCache._tab || 'bracket') : (c || 'overview'), c === 'm' ? d : null, true); } };
 
   function createTeamDialog(t) {
-    form('Регистрация команды', `
-      <div class="field"><label class="f">Название команды</label><input type="text" name="name" required minlength="2" maxlength="32"></div>
-      <div class="grid2"><div class="field"><label class="f">Тег (до 6 символов)</label><input type="text" name="tag" maxlength="6" placeholder="NAVI"></div>
-      <div class="field"><label class="f">Логотип (ссылка, необязательно)</label><input type="url" name="logo" placeholder="https://…"></div></div>
+    const m = form('Регистрация команды', `
+      <div class="grid2"><div class="field"><label class="f">Название команды</label><input type="text" name="name" required minlength="2" maxlength="32"></div>
+      <div class="field"><label class="f">Тег (до 6 символов)</label><input type="text" name="tag" maxlength="6" placeholder="NAVI"></div></div>
+      ${imgField('logo', 'Логотип (необязательно)', '', 'logo')}
       <div class="field"><label class="chk"><input type="checkbox" name="open" checked><span><b>Открытая команда</b><br><span class="hint" style="margin:0">Любой игрок сможет вступить сам. Если выключить — только по коду, который вы раздадите.</span></span></label></div>`,
     'Создать команду', async v => {
       const r = await act(() => api.createTeam(t.id, { name: v.name, tag: v.tag, logo: v.logo, open: !!v.open }));
@@ -334,6 +473,7 @@
       toast('Команда создана! Код для приглашения: ' + r.join_code);
       go(`#/t/${t.id}/teams`); refreshT();
     });
+    bindImgFields(m);
   }
   function joinCodeDialog(t) {
     form('Вступить в команду по коду', `<div class="field"><label class="f">Код команды</label><input type="text" name="code" required placeholder="Например, 7F3A9C1B" style="text-transform:uppercase;letter-spacing:.1em"><div class="hint">Код выдаёт капитан команды.</div></div>`,
@@ -353,7 +493,9 @@
         <div class="card"><div class="box-title">Детали</div><div class="kv">
           <span>Начало</span><b>${esc(fmtDate(t.starts_at))}</b>
           ${t.reg_closes_at ? `<span>Регистрация до</span><b>${esc(fmtDate(t.reg_closes_at))}</b>` : ''}
-          <span>Формат</span><b>${esc(t.mode)}, олимпийская система</b>
+          <span>Формат</span><b>${esc(t.mode)}, ${esc(fmtName(t).toLowerCase())}</b>
+          ${t.format === 'groups' ? `<span>Группы</span><b>${plural(t.group_count, 'группа', 'группы', 'групп')}, из каждой выходят ${t.group_advance}</b>` : ''}
+          ${t.checkin_minutes ? `<span>Чек-ин</span><b>за ${t.checkin_minutes} мин до старта</b>` : ''}
           ${t.team_size > 1 ? `<span>Состав</span><b>${t.team_size} игроков${t.max_subs ? ` + до ${t.max_subs} зап.` : ''}</b>` : ''}
           <span>Матчи</span><b>Bo${t.bo_default}, полуфинал Bo${t.bo_semifinal}, финал Bo${t.bo_final}</b>
           <span>Регион</span><b>${esc(t.region)}</b>
@@ -367,12 +509,25 @@
   // ---------- вкладка «Команды» ----------
   async function tabTeams(el, c) {
     const { t, teams, me, myTeam, canManage } = c;
-    if (!teams.length) { el.innerHTML = `<div class="empty"><div class="head">Пока никого</div>${regOpen(t) ? 'Станьте первыми — регистрация открыта.' : 'Регистрация ещё не началась или уже закрыта.'}</div>`; return; }
+    const agents = tCache.agents || [], invites = tCache.invites || [];
+    if (!teams.length && !agents.length) { el.innerHTML = `<div class="empty"><div class="head">Пока никого</div>${regOpen(t) ? 'Станьте первыми — регистрация открыта.' : 'Регистрация ещё не началась или уже закрыта.'}</div>`; return; }
     let contacts = {};
+    const ciStage = t.checkin_minutes && ['registration', 'closed'].includes(t.stage);
     const draw = () => {
       const canJoin = me && !myTeam && regOpen(t);
       const sorted = [...teams].sort((a, b) => (b === myTeam) - (a === myTeam) || (a.seed || 999) - (b.seed || 999));
-      el.innerHTML = `<div class="teams">${sorted.map(tm => {
+      const capTeam = myTeam && myTeam.captain_id === me.id && t.team_size > 1 && regOpen(t) && myTeam.members.length < t.team_size + t.max_subs ? myTeam : null;
+      const ciCount = teams.filter(x => x.checked_in_at).length;
+      const agentHtml = !agents.length || t.mode === '1v1' ? '' : `<div class="sec-head" style="margin:30px 0 12px"><div><h2 style="font-size:22px">Свободные агенты <span class="sub" style="font-size:15px">${agents.length}</span></h2><div class="sub">Игроки ищут команду${capTeam ? ' — пригласите их в свою' : ''}</div></div></div>
+        <div class="agents">${agents.map(a => {
+          const invited = myTeam && invites.some(i => i.team_id === myTeam.id && i.user_id === a.user_id);
+          const ct = contacts[a.user_id];
+          return `<div class="agent">${avatar(a)}<div class="grow"><div class="an"><a href="#/u/${esc(a.steam_id)}"><b>${esc(a.nickname)}</b></a>${a.faceit_level ? `<span class="lvl l${a.faceit_level}">${a.faceit_level}</span>` : ''}${a.premier_rating ? `<span class="hint" style="margin:0">Premier ${a.premier_rating}</span>` : ''}</div>
+            ${a.note ? `<div class="note">${esc(a.note)}</div>` : ''}${ct && (ct.discord || ct.telegram) ? `<div class="hint" style="margin:2px 0 0">${ct.discord ? 'Discord: ' + esc(ct.discord) : ''}${ct.discord && ct.telegram ? ' · ' : ''}${ct.telegram ? 'Telegram: ' + esc(ct.telegram) : ''}</div>` : ''}</div>
+            ${me && a.user_id === me.id ? '<span class="badge">это вы</span>' : invited ? `<button class="btn sm ghost" data-uninv="${esc(myTeam.id)}|${esc(a.user_id)}">Отозвать</button>` : capTeam ? `<button class="btn sm pri" data-inv="${esc(a.user_id)}">Пригласить</button>` : ''}</div>`;
+        }).join('')}</div>`;
+      el.innerHTML = `${ciStage ? `<div class="notice ${checkinOpen(t) ? 'warn' : ''}" style="margin-bottom:16px"><div><b>Чек-ин ${checkinOpen(t) ? 'открыт' : 'за ' + t.checkin_minutes + ' мин до старта'}.</b> Подтвердили участие: ${ciCount} из ${teams.length}. В сетку попадут только команды с чек-ином.</div></div>` : ''}
+        ${teams.length ? '' : '<div class="empty" style="padding:30px"><div class="head">Команд пока нет</div></div>'}<div class="teams">${sorted.map(tm => {
         const mine = tm === myTeam, cap = me && tm.captain_id === me.id, full = tm.members.length >= t.team_size + t.max_subs;
         const ctl = cap || canManage;
         const members = tm.members.map(m => {
@@ -389,10 +544,15 @@
         if (cap && regOpen(t)) foot += `<button class="btn sm danger" data-disband="${esc(tm.id)}">${t.team_size > 1 ? 'Распустить' : 'Отменить участие'}</button>`;
         if (canManage && !cap) foot += `<button class="btn sm danger" data-remove="${esc(tm.id)}">Удалить из турнира</button>`;
         if (canJoin && !full) foot += tm.is_open ? `<button class="btn sm pri" data-join="${esc(tm.id)}">Вступить</button>` : `<button class="btn sm" data-join-closed="${esc(tm.id)}">${I.lock}Вступить по коду</button>`;
+        if (ciStage && canManage) foot += `<button class="btn sm ${tm.checked_in_at ? 'ghost' : 'ok'}" data-ci-set="${esc(tm.id)}|${tm.checked_in_at ? 0 : 1}">${tm.checked_in_at ? 'Снять чек-ин' : 'Отметить чек-ин'}</button>`;
+        else if (ciStage && cap && !tm.checked_in_at && checkinOpen(t)) foot += `<button class="btn sm ok" data-ci="${esc(tm.id)}">Подтвердить участие</button>`;
+        const pend = invites.filter(i => i.team_id === tm.id && (cap || canManage));
+        const pendHtml = pend.length ? `<div class="pend">Приглашены: ${pend.map(i => { const a = agents.find(x => x.user_id === i.user_id); return `<span>${esc(me && i.user_id === me.id ? 'вы' : a ? a.nickname : 'игрок')}<button class="x" data-uninv="${esc(tm.id)}|${esc(i.user_id)}" title="Отозвать">×</button></span>`; }).join('')}</div>` : '';
+        const ciBadge = t.checkin_minutes ? (tm.checked_in_at ? '<span class="badge reg" title="Участие подтверждено">✓ чек-ин</span>' : ciStage ? '<span class="badge" title="Ещё не подтвердили участие">нет чек-ина</span>' : '') : '';
         return `<div class="team ${mine ? 'mine' : ''}"><div class="th">${teamLogo(tm)}<div style="flex:1;min-width:0"><h3>${esc(tm.name)}</h3>
-          <div class="meta">${tm.seed ? `Посев #${tm.seed} · ` : ''}${t.team_size > 1 ? `${tm.members.length} / ${t.team_size + t.max_subs}` : ''}${t.team_size > 1 ? (tm.is_open ? ' · открытая' : ' · по коду') : ''}</div></div>${tm.tag ? `<span class="badge">${esc(tm.tag)}</span>` : ''}</div>
-          <ul>${members}</ul>${foot ? `<div class="tf">${foot}</div>` : ''}</div>`;
-      }).join('')}</div>`;
+          <div class="meta">${tm.seed ? `Посев #${tm.seed} · ` : ''}${t.team_size > 1 ? `${tm.members.length} / ${t.team_size + t.max_subs}` : ''}${t.team_size > 1 ? (tm.is_open ? ' · открытая' : ' · по коду') : ''}</div></div>${ciBadge}${tm.tag ? `<span class="badge">${esc(tm.tag)}</span>` : ''}</div>
+          <ul>${members}</ul>${pendHtml}${foot ? `<div class="tf">${foot}</div>` : ''}</div>`;
+      }).join('')}</div>${agentHtml}`;
       bind();
     };
     const bind = () => {
@@ -410,32 +570,68 @@
       $$('[data-remove]', el).forEach(b => b.onclick = async () => { if (await ask('Удалить команду из турнира?', { ok: 'Удалить', danger: true }) && await act(() => api.disbandTeam(b.dataset.remove), 'Команда удалена')) refreshT(); });
       $$('[data-kick]', el).forEach(b => b.onclick = async () => { const [tm, u] = b.dataset.kick.split('|'); if (await ask('Исключить игрока из команды?', { ok: 'Исключить', danger: true }) && await act(() => api.kick(tm, u), 'Игрок исключён')) refreshT(); });
       $$('[data-cap]', el).forEach(b => b.onclick = async () => { const [tm, u] = b.dataset.cap.split('|'); if (await ask('Передать капитанство этому игроку?') && await act(() => api.makeCaptain(tm, u), 'Капитан изменён')) refreshT(); });
+      $$('[data-inv]', el).forEach(b => b.onclick = async () => { b.disabled = true; if (await act(() => api.invitePlayer(myTeam.id, b.dataset.inv), 'Приглашение отправлено')) refreshT(); else b.disabled = false; });
+      $$('[data-uninv]', el).forEach(b => b.onclick = async () => { const [tm, u] = b.dataset.uninv.split('|'); if (await act(() => api.cancelInvite(tm, u), 'Приглашение отозвано')) refreshT(); });
+      $$('[data-ci]', el).forEach(b => b.onclick = async () => { if (await act(() => api.checkin(b.dataset.ci), 'Участие подтверждено')) refreshT(); });
+      $$('[data-ci-set]', el).forEach(b => b.onclick = async () => { const [tm, v] = b.dataset.ciSet.split('|'); if (await act(() => api.setCheckin(tm, v === '1'), v === '1' ? 'Чек-ин отмечен' : 'Чек-ин снят')) refreshT(); });
     };
     draw();
-    if (me) { contacts = await api.contactsFor(teams.flatMap(x => x.members.map(m => m.user_id))).catch(() => ({})); if (Object.keys(contacts).length) draw(); }
+    if (me) { contacts = await api.contactsFor([...teams.flatMap(x => x.members.map(m => m.user_id)), ...agents.map(a => a.user_id)]).catch(() => ({})); if (Object.keys(contacts).length) draw(); }
   }
   function editTeamDialog(tm) {
-    form('Команда', `
-      <div class="field"><label class="f">Название</label><input type="text" name="name" value="${esc(tm.name)}" required minlength="2" maxlength="32"></div>
-      <div class="grid2"><div class="field"><label class="f">Тег</label><input type="text" name="tag" value="${esc(tm.tag || '')}" maxlength="6"></div>
-      <div class="field"><label class="f">Логотип (ссылка)</label><input type="url" name="logo_url" value="${esc(tm.logo_url || '')}"></div></div>
+    const md = form('Команда', `
+      <div class="grid2"><div class="field"><label class="f">Название</label><input type="text" name="name" value="${esc(tm.name)}" required minlength="2" maxlength="32"></div>
+      <div class="field"><label class="f">Тег</label><input type="text" name="tag" value="${esc(tm.tag || '')}" maxlength="6"></div></div>
+      ${imgField('logo_url', 'Логотип', tm.logo_url, 'logo')}
       <div class="field"><label class="chk"><input type="checkbox" name="is_open" ${tm.is_open ? 'checked' : ''}><span>Открытая команда — вступить может любой</span></label></div>
       <div class="field"><label class="chk"><input type="checkbox" name="new_code"><span>Выпустить новый код (старый перестанет работать)</span></label></div>`,
     'Сохранить', async v => { const ok = await act(() => api.updateTeam(tm.id, { name: v.name, tag: v.tag, logo_url: v.logo_url, is_open: !!v.is_open, new_code: !!v.new_code }), 'Сохранено'); if (!ok) return false; refreshT(); });
+    bindImgFields(md);
   }
 
   // ---------- вкладка «Сетка» ----------
   function tabBracket(el, c) {
     const { t, matches, teamById, myTeam } = c;
-    if (!matches.length) { el.innerHTML = `<div class="empty"><div class="head">Сетки пока нет</div>Она появится, когда организатор закроет регистрацию и сформирует пары.</div>`; return; }
-    const total = Math.max(...matches.map(m => m.round));
-    const cols = [];
-    for (let r = 1; r <= total; r++) {
-      const rm = matches.filter(m => m.round === r);
-      cols.push(`<div class="bround"><div class="rt">${roundName(r, total)}<small>Bo${rm[0] ? rm[0].best_of : ''}</small></div><div class="bcol">${rm.map(m => `<div class="bslot">${bmatch(m, teamById, myTeam, t)}</div>`).join('')}</div></div>`);
+    if (!matches.length) { el.innerHTML = `<div class="empty"><div class="head">Сетки пока нет</div>${t.format === 'groups' ? 'Группы появятся, когда организатор закроет регистрацию и распределит команды.' : 'Она появится, когда организатор закроет регистрацию и сформирует пары.'}</div>`; return; }
+    const by = br => matches.filter(m => (m.bracket || 'upper') === br);
+    const upper = by('upper'), lower = by('lower'), grand = by('grand'), groups = by('group');
+    const dbl = lower.length > 0;
+    const cols = (list, title, lowerBr) => {
+      const total = Math.max(...list.map(m => m.round)), out = [];
+      for (let r = 1; r <= total; r++) {
+        const rm = list.filter(m => m.round === r).sort((a, b) => a.position - b.position);
+        const straight = lowerBr && r % 2 === 1 && r < total;
+        out.push(`<div class="bround ${straight ? 'st' : ''}"><div class="rt">${title(r, total)}<small>Bo${rm[0] ? rm[0].best_of : ''}</small></div><div class="bcol">${rm.map(m => `<div class="bslot">${bmatch(m, teamById, myTeam, t)}</div>`).join('')}</div></div>`);
+      }
+      return `<div class="bracket-scroll"><div class="bracket">${out.join('')}</div></div>`;
+    };
+    let html = '';
+    if (groups.length) {
+      const st = window.OrganizmApi.groupStandings(groups, c.teams);
+      const gnums = [...new Set(groups.map(m => m.group_no))].sort((a, b) => a - b);
+      html += `<div class="groups">${gnums.map(g => {
+        const rows = st.filter(r => r.group_no === g), gm = groups.filter(m => m.group_no === g).sort((a, b) => a.round - b.round || a.position - b.position);
+        const left = gm.filter(m => m.status !== 'finished').length;
+        return `<div class="card group"><div class="gh"><h3>Группа ${groupLetter(g)}</h3><span class="hint" style="margin:0">${left ? `осталось ${plural(left, 'матч', 'матча', 'матчей')}` : 'все матчи сыграны'}</span></div>
+          <table class="gtable"><thead><tr><th>#</th><th>Команда</th><th title="Сыграно">И</th><th title="Победы">В</th><th title="Поражения">П</th><th title="Разница счёта">±</th></tr></thead><tbody>
+          ${rows.map(r => { const tm = teamById[r.team_id]; return `<tr class="${r.place <= t.group_advance ? 'adv' : ''} ${myTeam && myTeam.id === r.team_id ? 'me' : ''}"><td>${r.place}</td><td><span class="row" style="gap:8px;flex-wrap:nowrap">${teamLogo(tm, 'sm')}<b>${esc(tm ? tm.name : '?')}</b></span></td><td>${r.played}</td><td>${r.wins}</td><td>${r.losses}</td><td>${r.diff > 0 ? '+' : ''}${r.diff}</td></tr>`; }).join('')}
+          </tbody></table>
+          <div class="gmatches">${gm.map(m => { const a = teamById[m.team_a], b = teamById[m.team_b], fin = m.status === 'finished';
+            return `<div class="gm ${m.status === 'live' ? 'live' : ''}" data-gm="${esc(m.id)}"><span class="r">Тур ${m.round}</span><span class="tn ${fin && m.winner_id === m.team_a ? 'w' : ''}">${esc(a ? a.name : 'TBD')}</span><span class="s">${fin ? `${m.score_a}:${m.score_b}` : m.status === 'live' ? '<span style="color:#ff8587">●</span>' : 'vs'}</span><span class="tn r2 ${fin && m.winner_id === m.team_b ? 'w' : ''}">${esc(b ? b.name : 'TBD')}</span></div>`; }).join('')}</div></div>`;
+      }).join('')}</div>
+      <div class="hint">Из каждой группы в плей-офф выходят ${plural(t.group_advance, 'команда', 'команды', 'команд')} (выделены). Места: победы, затем разница счёта.</div>`;
+      html += `<h3 class="bsec">Плей-офф</h3>`;
+      html += upper.length ? cols(upper, roundName) : `<div class="empty" style="padding:28px">Плей-офф сформируется после группового этапа.</div>`;
+    } else if (dbl) {
+      html += `<h3 class="bsec">Верхняя сетка</h3>` + cols(upper, (r, n) => r === n ? 'Финал' : r === n - 1 ? 'Полуфинал' : 'Раунд ' + r);
+      html += `<h3 class="bsec">Нижняя сетка <span class="hint" style="margin:0;text-transform:none;letter-spacing:0">второй шанс для проигравших</span></h3>` + cols(lower, (r, n) => r === n ? 'Финал' : 'Раунд ' + r, true);
+      if (grand.length) html += `<h3 class="bsec">Гранд-финал</h3><div style="max-width:300px">${bmatch(grand[0], teamById, myTeam, t)}</div>`;
+    } else {
+      html += cols(upper, roundName);
     }
-    el.innerHTML = `<div class="bracket-scroll"><div class="bracket">${cols.join('')}</div></div><div class="hint">Нажмите на матч, чтобы открыть детали, пики и баны.</div>`;
-    $$('.bm', el).forEach(b => b.onclick = () => go(`#/t/${t.id}/m/${b.dataset.m}`));
+    el.innerHTML = html + `<div class="hint">Нажмите на матч, чтобы открыть детали, пики и баны.</div>`;
+    $$('.bm:not(.void)', el).forEach(b => b.onclick = () => go(`#/t/${t.id}/m/${b.dataset.m}`));
+    $$('[data-gm]', el).forEach(b => b.onclick = () => go(`#/t/${t.id}/m/${b.dataset.gm}`));
   }
   function bmatch(m, teamById, myTeam, t) {
     const row = (id, sc) => {
@@ -446,7 +642,8 @@
     };
     const mine = myTeam && (m.team_a === myTeam.id || m.team_b === myTeam.id);
     const meta = m.is_bye ? 'проход без игры' : m.status === 'live' ? '<span style="color:#ff8587">● идёт</span>' : m.status === 'finished' ? 'завершён' : m.scheduled_at ? esc(fmtDate(m.scheduled_at)) : 'время не назначено';
-    return `<div class="bm ${m.status === 'live' ? 'live' : ''} ${mine ? 'mine' : ''}" data-m="${esc(m.id)}">${row(m.team_a, m.score_a)}${row(m.team_b, m.score_b)}<div class="bmeta"><span>${meta}</span><span>${m.veto && m.veto.decider ? esc(m.veto.decider) : ''}</span></div></div>`;
+    const isVoid = m.is_bye && !m.team_a && !m.team_b;
+    return `<div class="bm ${m.status === 'live' ? 'live' : ''} ${mine ? 'mine' : ''} ${isVoid ? 'void' : m.is_bye ? 'bye' : ''}" data-m="${esc(m.id)}">${row(m.team_a, m.score_a)}${row(m.team_b, m.score_b)}<div class="bmeta"><span>${meta}</span><span>${m.veto && m.veto.decider ? esc(m.veto.decider) : ''}</span></div></div>`;
   }
 
   // ---------- вкладка «Матчи» ----------
@@ -454,23 +651,27 @@
     const { t, matches, teamById, myTeam } = c;
     const real = matches.filter(m => !m.is_bye);
     if (!real.length) { el.innerHTML = `<div class="empty"><div class="head">Матчей пока нет</div>Они появятся после формирования сетки.</div>`; return; }
-    const total = Math.max(...matches.map(m => m.round));
     let html = '';
     if (myTeam) {
       const mine = real.filter(m => m.team_a === myTeam.id || m.team_b === myTeam.id);
-      if (mine.length) html += `<div class="rgroup" style="color:var(--accent)">Матчи вашей команды</div><div class="mlist">${mine.map(m => mrow(m, teamById, total)).join('')}</div>`;
+      if (mine.length) html += `<div class="rgroup" style="color:var(--accent)">Матчи вашей команды</div><div class="mlist">${mine.map(m => mrow(m, teamById, matches)).join('')}</div>`;
     }
-    for (let r = total; r >= 1; r--) {
-      const rm = real.filter(m => m.round === r);
-      if (rm.length) html += `<div class="rgroup">${roundName(r, total)}</div><div class="mlist">${rm.map(m => mrow(m, teamById, total)).join('')}</div>`;
-    }
+    // сначала идущие и ближайшие стадии, сыгранные — ниже
+    const ORD = { group: 0, upper: 1, lower: 2, grand: 3 };
+    const groups = new Map();
+    [...real].sort((a, b) => ORD[a.bracket || 'upper'] - ORD[b.bracket || 'upper'] || a.round - b.round || (a.group_no || 0) - (b.group_no || 0) || a.position - b.position)
+      .forEach(m => { const k = m.bracket === 'group' ? 'Групповой этап · Тур ' + m.round : matchName(m, matches); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(m); });
+    const entries = [...groups.entries()];
+    const active = entries.filter(([, l]) => l.some(m => m.status !== 'finished')), done = entries.filter(([, l]) => l.every(m => m.status === 'finished')).reverse();
+    for (const [k, l] of [...active, ...done]) html += `<div class="rgroup">${esc(k)}</div><div class="mlist">${l.map(m => mrow(m, teamById, matches)).join('')}</div>`;
     el.innerHTML = html;
     $$('.mrow', el).forEach(r => r.onclick = () => go(`#/t/${t.id}/m/${r.dataset.m}`));
   }
-  function mrow(m, teamById, total) {
+  function mrow(m, teamById, matches) {
     const a = teamById[m.team_a], b = teamById[m.team_b];
+    const label = m.bracket === 'group' ? `<div class="ml">Группа ${groupLetter(m.group_no)}</div>` : '';
     const st = m.status === 'live' ? '<span class="badge live">Идёт</span>' : m.status === 'finished' ? '<span class="badge done">Сыгран</span>' : m.veto && m.veto.log && m.veto.log.length && !m.veto.decider ? '<span class="badge soon">Пики/баны</span>' : '<span class="badge">Ожидает</span>';
-    return `<div class="mrow" data-m="${esc(m.id)}"><div class="when">${m.scheduled_at ? esc(fmtDay(m.scheduled_at)) + '<br>' + esc(new Date(m.scheduled_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })) : 'время не назначено'}</div>
+    return `<div class="mrow" data-m="${esc(m.id)}"><div class="when">${label}${m.scheduled_at ? esc(fmtDay(m.scheduled_at)) + '<br>' + esc(new Date(m.scheduled_at).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })) : 'время не назначено'}</div>
       <div class="tm r"><span>${a ? esc(a.name) : 'TBD'}</span>${teamLogo(a, 'sm')}</div>
       <div class="score">${m.status === 'finished' ? `${m.score_a}:${m.score_b}` : '<span style="color:var(--dim);font-size:14px">Bo' + m.best_of + '</span>'}</div>
       <div class="tm">${teamLogo(b, 'sm')}<span>${b ? esc(b.name) : 'TBD'}</span></div>
@@ -483,7 +684,6 @@
     const m = matches.find(x => x.id === mid);
     if (!m) return;
     const A = teamById[m.team_a], B = teamById[m.team_b];
-    const total = Math.max(...matches.map(x => x.round));
     const seq = window.OrganizmApi.vetoSequence(m.best_of, t.map_pool.length);
     const log = (m.veto && m.veto.log) || [];
     const step = log.length, done = step >= seq.length || !!(m.veto && m.veto.decider);
@@ -523,7 +723,7 @@
       <div class="row"><button class="btn" id="saveMatch">Сохранить матч</button>${log.length ? '<button class="btn danger" id="resetVeto">Сбросить пики/баны</button>' : ''}</div></div>` : '';
 
     const win = id => m.winner_id && m.winner_id === id ? 'w' : '';
-    const md = modal(`${roundName(m.round, total)} · Bo${m.best_of}`, `
+    const md = modal(`${esc(matchName(m, matches))} · Bo${m.best_of}`, `
       <div class="versus">
         <div class="side ${win(m.team_a)}">${teamLogo(A)}<b>${A ? esc(A.name) : 'TBD'}</b></div>
         <div class="mid"><div class="big">${m.status === 'finished' && !m.is_bye ? `${m.score_a}:${m.score_b}` : 'VS'}</div>
@@ -566,6 +766,8 @@
   function tabManage(el, c) {
     const { t, teams, matches } = c;
     let order = [...teams].sort((a, b) => (a.seed || 999) - (b.seed || 999) || a.created_at.localeCompare(b.created_at)).map(x => x.id);
+    const pool = teams.filter(x => x.checked_in_at).length;
+    const groupM = matches.filter(m => m.bracket === 'group'), groupLeft = groupM.filter(m => m.status !== 'finished').length;
     const stages = [['registration', 'Регистрация'], ['closed', 'Регистрация закрыта'], ['ongoing', 'Идёт'], ['finished', 'Завершён'], ['cancelled', 'Отменён']];
     el.innerHTML = `<div class="two">
       <div class="card form-card" id="editBox"></div>
@@ -573,12 +775,15 @@
         <div class="card"><div class="box-title">Стадия турнира</div>
           <div class="side-menu">${stages.map(([k, l]) => `<button class="btn sm ${t.stage === k ? 'pri' : 'ghost'}" style="justify-content:flex-start" data-stage="${k}">${l}</button>`).join('')}</div>
           <div class="hint">Регистрация закрывается сама в указанное время. «Идёт» включается автоматически при создании сетки, «Завершён» — после финала.</div></div>
-        <div class="card"><div class="box-title">Сетка</div>
+        <div class="card"><div class="box-title">${t.format === 'groups' ? 'Группы и плей-офф' : 'Сетка'} <span class="badge" style="margin-left:6px">${esc(fmtName(t))}</span></div>
           ${teams.length < 2 ? '<div class="hint" style="margin:0">Нужно минимум 2 команды.</div>' : `
-          <div class="hint" style="margin:0 0 10px">Порядок посева: №1 — сильнейшая. Сильные команды разводятся по сетке, лишние места превращаются в проходы.</div>
+          ${t.checkin_minutes ? `<div class="notice ${pool < teams.length ? 'warn' : ''}" style="margin-bottom:10px"><div>Чек-ин прошли <b>${pool} из ${teams.length}</b>. В ${t.format === 'groups' ? 'группы' : 'сетку'} попадут только они.</div></div>` : ''}
+          <div class="hint" style="margin:0 0 10px">${t.format === 'groups' ? 'Порядок посева: команды раскладываются по группам «змейкой», чтобы сильные не попали в одну группу.' : 'Порядок посева: №1 — сильнейшая. Сильные команды разводятся по сетке, лишние места превращаются в проходы.'}</div>
           <div class="order" id="order"></div>
-          <div class="row" style="margin-top:12px"><button class="btn pri sm" id="genSeed">Сформировать по порядку</button><button class="btn sm" id="genRand">Случайный посев</button></div>
-          ${matches.length ? '<div class="hint">Сетка уже есть — повторное формирование удалит все результаты.</div>' : ''}`}
+          <div class="row" style="margin-top:12px"><button class="btn pri sm" id="genSeed">${t.format === 'groups' ? 'Сформировать группы' : 'Сформировать по порядку'}</button><button class="btn sm" id="genRand">Случайный посев</button></div>
+          ${matches.length ? `<div class="hint">${t.format === 'groups' ? 'Группы' : 'Сетка'} уже есть — повторное формирование удалит все результаты.</div>` : ''}
+          ${t.format === 'groups' && groupM.length ? `<div class="form-sec" style="padding:14px 0 0;margin-top:14px"><b>Плей-офф</b><div class="hint" style="margin:4px 0 10px">${groupLeft ? `Сыграйте ещё ${plural(groupLeft, 'матч', 'матча', 'матчей')} групп, чтобы сформировать плей-офф.` : `Группы сыграны. В плей-офф выйдут ${plural(t.group_advance * new Set(groupM.map(m => m.group_no)).size, 'команда', 'команды', 'команд')}: первые места против вторых из соседних групп.`}</div>
+            <button class="btn ${groupLeft ? '' : 'pri'} sm" id="genPO" ${groupLeft ? 'disabled' : ''}>${matches.some(m => m.bracket === 'upper') ? 'Пересоздать плей-офф' : 'Сформировать плей-офф'}</button></div>` : ''}`}
         </div>
         <div class="card"><div class="box-title">Опасная зона</div><button class="btn danger block" id="delT">Удалить турнир</button></div>
       </div></div>`;
@@ -596,13 +801,18 @@
     };
     const gs = $('#genSeed', el); if (gs) gs.onclick = () => gen(false);
     const gr = $('#genRand', el); if (gr) gr.onclick = () => gen(true);
+    const po = $('#genPO', el); if (po) po.onclick = async () => {
+      if (matches.some(m => m.bracket === 'upper') && !await ask('Пересоздать плей-офф? Его результаты будут удалены.', { ok: 'Пересоздать', danger: true })) return;
+      if (await act(() => api.generatePlayoff(t.id), 'Плей-офф сформирован')) { await refreshT(); go(`#/t/${t.id}/bracket`); }
+    };
     $$('[data-stage]', el).forEach(b => b.onclick = async () => { if (await act(() => api.setStage(t.id, b.dataset.stage), 'Стадия изменена')) refreshT(); });
     $('#delT', el).onclick = async () => { if (await ask(`Удалить турнир «${esc(t.title)}» навсегда?`, { ok: 'Удалить', danger: true }) && await act(() => api.deleteTournament(t.id), 'Турнир удалён')) go('#/'); };
   }
 
   // ---------- форма турнира (создание и редактирование) ----------
   function tournamentForm(box, t, onSubmit, submitLabel) {
-    t = t || { mode: '5v5', max_teams: 16, max_subs: 1, region: 'RU / СНГ', map_pool: MAPS.slice(0, 7), bo_default: 1, bo_semifinal: 3, bo_final: 3, entry_fee: 'Бесплатно' };
+    t = t || { mode: '5v5', max_teams: 16, max_subs: 1, region: 'RU / СНГ', map_pool: MAPS.slice(0, 7), bo_default: 1, bo_semifinal: 3, bo_final: 3, entry_fee: 'Бесплатно', format: 'single', group_count: 2, group_advance: 2, checkin_minutes: null };
+    const fmt = t.format || 'single';
     const pool = Array.from(new Set([...MAPS, ...t.map_pool]));
     const bo = (name, v) => `<select name="${name}">${[1, 3, 5].map(b => `<option value="${b}" ${b === v ? 'selected' : ''}>Bo${b}</option>`).join('')}</select>`;
     box.innerHTML = `<form novalidate>
@@ -612,11 +822,19 @@
           <div class="field"><label class="f">Начало турнира *</label><input type="datetime-local" name="starts_at" required value="${toLocalInput(t.starts_at)}"></div>
           <div class="field"><label class="f">Регистрация до</label><input type="datetime-local" name="reg_closes_at" value="${toLocalInput(t.reg_closes_at)}"><div class="hint">Пусто — пока не закроете вручную.</div></div>
         </div>
+        <div class="field"><label class="f">Чек-ин перед стартом</label><select name="checkin_minutes">${[['', 'Без чек-ина'], [15, 'За 15 минут'], [30, 'За 30 минут'], [60, 'За 1 час'], [120, 'За 2 часа']].map(([v, l]) => `<option value="${v}" ${String(v) === String(t.checkin_minutes ?? '') ? 'selected' : ''}>${l}</option>`).join('')}</select>
+          <div class="hint">Капитаны подтверждают участие на сайте. В сетку попадут только подтвердившие — неявки не испортят турнир.</div></div>
         <div class="field"><label class="f">Описание</label><textarea name="description" maxlength="4000" placeholder="Для кого турнир, расписание, трансляция…">${esc(t.description || '')}</textarea></div>
         <div class="field"><label class="f">Правила</label><textarea name="rules" maxlength="8000" placeholder="Античит, опоздания, споры…">${esc(t.rules || '')}</textarea></div>
       </div>
       <div class="form-sec"><h3>Формат</h3>
         <div class="field"><label class="f">Режим</label><div class="seg" id="modeSeg">${['5v5', '2v2', '1v1'].map(m => `<button type="button" data-mode="${m}" class="${t.mode === m ? 'on' : ''}">${m}</button>`).join('')}</div><input type="hidden" name="mode" value="${esc(t.mode)}"></div>
+        <div class="field"><label class="f">Система</label><div class="fmts" id="fmtSeg">${[['single', 'Олимпийская', 'Проиграл — выбыл. Быстро и просто.'], ['double', 'Двойное выбывание', 'Второй шанс в нижней сетке, гранд-финал.'], ['groups', 'Группы + плей-офф', 'Круговой турнир в группах, лучшие — в плей-офф.']]
+          .map(([k, l, d]) => `<button type="button" data-fmt="${k}" class="${fmt === k ? 'on' : ''}"><b>${l}</b><span>${d}</span></button>`).join('')}</div><input type="hidden" name="format" value="${fmt}"></div>
+        <div class="grid2" id="grpBox">
+          <div class="field"><label class="f">Количество групп</label><select name="group_count">${[1, 2, 3, 4, 6, 8].map(n => `<option ${n === t.group_count ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+          <div class="field"><label class="f">Выходят из группы</label><select name="group_advance">${[1, 2, 3, 4].map(n => `<option ${n === t.group_advance ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
+        </div>
         <div class="grid3">
           <div class="field"><label class="f">Максимум участников</label><select name="max_teams">${[4, 8, 16, 32, 64, 128].map(n => `<option ${n === t.max_teams ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
           <div class="field" id="subsBox"><label class="f">Запасных в команде</label><select name="max_subs">${[0, 1, 2, 3].map(n => `<option ${n === t.max_subs ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
@@ -633,9 +851,9 @@
         <div class="grid2">
           <div class="field"><label class="f">Призовой фонд</label><input type="text" name="prize" maxlength="120" value="${esc(t.prize || '')}" placeholder="30 000 ₽ / скины / медали"></div>
           <div class="field"><label class="f">Взнос</label><input type="text" name="entry_fee" maxlength="60" value="${esc(t.entry_fee || '')}" placeholder="Бесплатно"></div>
-          <div class="field"><label class="f">Обложка (ссылка на картинку)</label><input type="url" name="banner_url" value="${esc(t.banner_url || '')}" placeholder="https://…"></div>
           <div class="field"><label class="f">Связь (Discord / Telegram)</label><input type="url" name="contact_url" value="${esc(t.contact_url || '')}" placeholder="https://discord.gg/…"></div>
         </div>
+        ${imgField('banner_url', 'Обложка (лучше 1600×600, обрежется до 8:3)', t.banner_url, 'banner')}
       </div>
       <div class="row" style="padding-top:18px"><button class="btn pri lg">${submitLabel}</button></div>
     </form>`;
@@ -643,6 +861,10 @@
     const syncMode = () => { const m = f.mode.value; $('#subsBox', box).classList.toggle('hidden', m === '1v1'); };
     $$('#modeSeg button', box).forEach(b => b.onclick = () => { f.mode.value = b.dataset.mode; $$('#modeSeg button', box).forEach(x => x.classList.toggle('on', x === b)); syncMode(); });
     syncMode();
+    const syncFmt = () => $('#grpBox', box).classList.toggle('hidden', f.format.value !== 'groups');
+    $$('#fmtSeg button', box).forEach(b => b.onclick = () => { f.format.value = b.dataset.fmt; $$('#fmtSeg button', box).forEach(x => x.classList.toggle('on', x === b)); syncFmt(); });
+    syncFmt();
+    bindImgFields(box);
     f.onsubmit = async e => {
       e.preventDefault();
       const v = Object.fromEntries(new FormData(f));
@@ -657,6 +879,7 @@
         max_teams: Number(v.max_teams), max_subs: Number(v.max_subs ?? 0), region: v.region,
         bo_default: Number(v.bo_default), bo_semifinal: Number(v.bo_semifinal), bo_final: Number(v.bo_final),
         map_pool: maps, prize: v.prize, entry_fee: v.entry_fee, banner_url: v.banner_url, contact_url: v.contact_url,
+        format: v.format, group_count: Number(v.group_count), group_advance: Number(v.group_advance), checkin_minutes: v.checkin_minutes ? Number(v.checkin_minutes) : '',
       });
       btn.disabled = false;
     };
@@ -686,8 +909,10 @@
     const mine = await api.listTournaments('mine').catch(() => []);
     app.innerHTML = `<div class="wrap">
       <div class="profile-head">${avatar(me, 'lg')}<div><div class="kicker">Мой профиль</div><h1>${esc(me.nickname)}</h1><div class="sub">Ник и аватар берутся из Steam и обновляются при каждом входе · <a href="${esc(me.profile_url || '#')}" target="_blank" rel="noopener" style="color:var(--accent)">профиль Steam ${I.ext}</a></div></div></div>
+      ${statTiles(prof && prof.stats)}
       <div class="two" style="margin-top:20px">
         <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="box-title">Последние матчи</div>${historyHtml(prof && prof.history)}</div>
           <div class="card"><div class="box-title">Мои турниры (организатор)</div>${mine.length ? `<div class="list">${mine.map(t => `<a class="li" href="#/t/${esc(t.id)}"><span class="grow"><b>${esc(t.title)}</b><span>${esc(fmtDate(t.starts_at))} · ${t.teams_count} / ${t.max_teams}</span></span>${stageBadge(t)}</a>`).join('')}</div>` : '<div class="hint" style="margin:0">Вы ещё не проводили турниров. <a href="#/create" style="color:var(--accent)">Создать первый</a></div>'}</div>
           <div class="card"><div class="box-title">Мои команды</div>${teamsList(prof ? prof.teams : [])}</div>
         </div>
@@ -713,19 +938,44 @@
     if (!list.length) return '<div class="hint" style="margin:0">Вы пока не состоите ни в одной команде. <a href="#/" style="color:var(--accent)">Найти турнир</a></div>';
     return `<div class="list">${list.sort((a, b) => b.tournament.starts_at.localeCompare(a.tournament.starts_at)).map(x => `<a class="li" href="#/t/${esc(x.tournament.id)}/teams">${teamLogo(x.team, 'sm')}<span class="grow"><b>${esc(x.team.name)}</b><span>${esc(x.tournament.title)} · ${esc(fmtDate(x.tournament.starts_at))}</span></span><span class="role ${x.role === 'captain' ? 'cap' : ''}">${{ captain: 'Капитан', player: 'Игрок', sub: 'Запас' }[x.role]}</span></a>`).join('')}</div>`;
   }
+  function statTiles(s) {
+    s = s || { points: 0, matches: 0, wins: 0, finals: 0, titles: 0, tournaments: 0 };
+    return `<div class="ptiles">
+      <div><b>${s.points}</b><span>очков рейтинга</span></div>
+      <div><b>${s.tournaments}</b><span>турниров</span></div>
+      <div><b>${s.matches}</b><span>матчей</span></div>
+      <div><b>${s.matches ? Math.round(s.wins / s.matches * 100) : 0}%</b><span>побед (${s.wins})</span></div>
+      <div><b>${s.finals}</b><span>финалов</span></div>
+      <div class="${s.titles ? 'gold' : ''}"><b>${s.titles}</b><span>титулов</span></div></div>`;
+  }
+  function historyHtml(list) {
+    if (!list || !list.length) return '<div class="hint" style="margin:0">Сыгранных матчей пока нет.</div>';
+    return `<div class="hist">${list.map(m => {
+      const my = m.mine === m.team_a ? m.A : m.B, op = m.mine === m.team_a ? m.B : m.A;
+      const win = m.winner_id === m.mine, ms = m.mine === m.team_a ? m.score_a : m.score_b, os = m.mine === m.team_a ? m.score_b : m.score_a;
+      return `<a class="hrow" href="#/t/${esc(m.tournament_id)}/m/${esc(m.id)}"><span class="res ${win ? 'w' : 'l'}">${win ? 'W' : 'L'}</span>
+        <span class="grow"><b>${esc(my ? my.name : '')} <span class="vs">vs</span> ${esc(op ? op.name : '?')}</b><span>${esc(m.tournament ? m.tournament.title : '')}${m.bracket === 'group' ? ' · группы' : m.bracket === 'grand' || !m.next_match_id ? ' · финал' : ''}</span></span>
+        <span class="sc">${ms}:${os}</span></a>`;
+    }).join('')}</div>`;
+  }
   async function viewProfile(steamId) {
     if (api.me && api.me.steam_id === steamId) return viewMe();
     app.innerHTML = '<div class="loader">Загружаю профиль…</div>';
     const prof = await api.getProfile(steamId).catch(() => null);
     if (!prof) { app.innerHTML = `<div class="wrap section"><div class="empty"><div class="head">Игрок не найден</div></div></div>`; return; }
     const p = prof.profile;
+    setTitle(p.nickname);
     app.innerHTML = `<div class="wrap">
       <div class="profile-head">${avatar(p, 'lg')}<div><div class="row" style="gap:8px">${p.is_admin ? '<span class="badge soon">Администратор</span>' : ''}${p.country ? `<span class="badge">${esc(p.country)}</span>` : ''}</div><h1>${esc(p.nickname)}</h1>
         <div class="row" style="margin-top:8px"><a class="btn sm" href="${esc(p.profile_url || 'https://steamcommunity.com/profiles/' + p.steam_id)}" target="_blank" rel="noopener">${I.steam}Steam</a>${p.faceit_url ? `<a class="btn sm" href="${esc(p.faceit_url)}" target="_blank" rel="noopener">FACEIT ${I.ext}</a>` : ''}
         ${p.faceit_level ? `<span class="row" style="gap:6px;font-size:14px"><span class="lvl l${p.faceit_level}">${p.faceit_level}</span>FACEIT</span>` : ''}${p.premier_rating ? `<span class="badge">Premier ${p.premier_rating}</span>` : ''}</div></div></div>
       ${p.bio ? `<p class="pre" style="max-width:640px;color:var(--muted)">${esc(p.bio)}</p>` : ''}
+      ${statTiles(prof.stats)}
       <div class="two" style="margin-top:22px;padding-bottom:20px">
-        <div class="card"><div class="box-title">Команды и турниры</div>${prof.teams.length ? teamsList(prof.teams) : '<div class="hint" style="margin:0">Пока не участвовал в турнирах.</div>'}</div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <div class="card"><div class="box-title">Последние матчи</div>${historyHtml(prof.history)}</div>
+          <div class="card"><div class="box-title">Команды и турниры</div>${prof.teams.length ? teamsList(prof.teams) : '<div class="hint" style="margin:0">Пока не участвовал в турнирах.</div>'}</div>
+        </div>
         <div class="card"><div class="box-title">Проводит турниры</div>${prof.organized.length ? `<div class="list">${prof.organized.map(t => `<a class="li" href="#/t/${esc(t.id)}"><span class="grow"><b>${esc(t.title)}</b><span>${esc(fmtDate(t.starts_at))}</span></span>${stageBadge(t)}</a>`).join('')}</div>` : '<div class="hint" style="margin:0">Нет турниров.</div>'}</div>
       </div></div>`;
   }
@@ -785,8 +1035,10 @@
         if (tCache && tCache.t.id === b && !switching) return drawTournament(c === 'm' ? (tCache._tab || 'bracket') : (c || 'overview'), c === 'm' ? d : null, true);
         return await viewTournament(b, c === 'm' ? 'bracket' : (c || 'overview'), c === 'm' ? d : null);
       }
-      if (a === 'create') return viewCreate();
-      if (a === 'me') return await viewMe();
+      if (a === 'create') { setTitle('Новый турнир'); return viewCreate(); }
+      if (a === 'rating') return await viewRating();
+      if (a === 'me') { setTitle('Мой профиль'); return await viewMe(); }
+      if (a === 'admin') setTitle('Модерация');
       if (a === 'u' && b) return await viewProfile(b);
       if (a === 'admin') return await viewAdmin(b || 'queue');
       app.innerHTML = `<div class="wrap section"><div class="empty"><div class="head">Страница не найдена</div><a class="btn" href="#/" style="margin-top:14px">На главную</a></div></div>`;

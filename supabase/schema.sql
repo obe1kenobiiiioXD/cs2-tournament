@@ -119,6 +119,57 @@ create table if not exists public.announcements (
 );
 
 -- ---------------------------------------------------------------------
+-- Версия 2: форматы турниров, чек-ин, свободные агенты, приглашения
+-- ---------------------------------------------------------------------
+alter table public.tournaments add column if not exists format          text not null default 'single';
+alter table public.tournaments add column if not exists group_count     int  not null default 2;
+alter table public.tournaments add column if not exists group_advance   int  not null default 2;
+alter table public.tournaments add column if not exists checkin_minutes int;
+alter table public.teams       add column if not exists checked_in_at   timestamptz;
+alter table public.matches     add column if not exists bracket         text not null default 'upper';
+alter table public.matches     add column if not exists group_no        int;
+alter table public.matches     add column if not exists next_match_id   uuid references public.matches(id) on delete set null;
+alter table public.matches     add column if not exists next_slot       text;
+alter table public.matches     add column if not exists loser_match_id  uuid references public.matches(id) on delete set null;
+alter table public.matches     add column if not exists loser_slot      text;
+alter table public.matches drop constraint if exists matches_tournament_id_round_position_key;
+create unique index if not exists matches_slot_unique on public.matches (tournament_id, bracket, coalesce(group_no, 0), round, position);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'tournaments_format_check') then
+    alter table public.tournaments add constraint tournaments_format_check check (format in ('single', 'double', 'groups'));
+    alter table public.tournaments add constraint tournaments_group_count_check check (group_count between 1 and 8);
+    alter table public.tournaments add constraint tournaments_group_advance_check check (group_advance between 1 and 4);
+    alter table public.tournaments add constraint tournaments_checkin_check check (checkin_minutes is null or checkin_minutes between 5 and 1440);
+    alter table public.matches add constraint matches_bracket_check check (bracket in ('upper', 'lower', 'grand', 'group'));
+  end if;
+end $$;
+
+-- игроки без команды, которые ищут её в конкретном турнире
+create table if not exists public.free_agents (
+  tournament_id uuid not null references public.tournaments(id) on delete cascade,
+  user_id       uuid not null references public.profiles(id) on delete cascade,
+  note          text check (char_length(note) <= 200),
+  created_at    timestamptz not null default now(),
+  primary key (tournament_id, user_id)
+);
+
+-- приглашения от капитана игроку
+create table if not exists public.team_invites (
+  team_id       uuid not null references public.teams(id) on delete cascade,
+  tournament_id uuid not null references public.tournaments(id) on delete cascade,
+  user_id       uuid not null references public.profiles(id) on delete cascade,
+  created_at    timestamptz not null default now(),
+  primary key (team_id, user_id)
+);
+
+-- матчи, созданные до версии 2: проставить, куда уходит победитель
+update public.matches m set next_match_id = nx.id, next_slot = case when m.position % 2 = 1 then 'a' else 'b' end
+from public.matches nx
+where m.next_match_id is null and m.bracket = 'upper' and nx.bracket = 'upper'
+  and nx.tournament_id = m.tournament_id and nx.round = m.round + 1 and nx.position = (m.position + 1) / 2;
+
+-- ---------------------------------------------------------------------
 -- Вспомогательные функции
 -- ---------------------------------------------------------------------
 create or replace function public.is_admin() returns boolean
@@ -203,7 +254,11 @@ begin
     if coalesce(array_length(pool, 1), 0) not between 5 and 10 then raise exception 'В пуле должно быть от 5 до 10 карт'; end if;
   end if;
   if not is_new and has_teams and p ? 'mode' and p->>'mode' <> (select mode from tournaments where id = t) then
-    raise exception 'Формат нельзя менять, когда уже есть команды';
+    raise exception 'Режим нельзя менять, когда уже есть команды';
+  end if;
+  if not is_new and p ? 'format' and p->>'format' <> (select format from tournaments where id = t)
+     and exists (select 1 from matches where tournament_id = t) then
+    raise exception 'Формат сетки нельзя менять, когда сетка уже создана';
   end if;
   update tournaments set
     title         = coalesce(nullif(btrim(p->>'title'), ''), title),
@@ -224,6 +279,10 @@ begin
     bo_default    = case when p ? 'bo_default' then (p->>'bo_default')::int else bo_default end,
     bo_semifinal  = case when p ? 'bo_semifinal' then (p->>'bo_semifinal')::int else bo_semifinal end,
     bo_final      = case when p ? 'bo_final' then (p->>'bo_final')::int else bo_final end,
+    format        = case when p ? 'format' then p->>'format' else format end,
+    group_count   = case when p ? 'group_count' then (p->>'group_count')::int else group_count end,
+    group_advance = case when p ? 'group_advance' then (p->>'group_advance')::int else group_advance end,
+    checkin_minutes = case when p ? 'checkin_minutes' then nullif(p->>'checkin_minutes', '')::int else checkin_minutes end,
     updated_at    = now()
   where id = t;
   if (select max_teams < (select count(*) from teams where tournament_id = t) from tournaments where id = t) then
@@ -342,12 +401,15 @@ begin
   returning id into tid;
   insert into team_secrets (team_id, join_code) values (tid, code);
   insert into team_members (team_id, tournament_id, user_id, role) values (tid, t, uid, 'captain');
+  delete from free_agents where tournament_id = t and user_id = uid;
+  delete from team_invites where tournament_id = t and user_id = uid;
   return jsonb_build_object('team_id', tid, 'join_code', code);
 end $$;
 
-create or replace function public.join_team(team uuid, code text default null) returns void
+-- общие проверки вступления в команду (без кода)
+create or replace function public._join(team uuid, uid uuid) returns void
 language plpgsql security definer set search_path = public as $$
-declare uid uuid := public._me(); tm teams; r tournaments; cnt int;
+declare tm teams; r tournaments; cnt int;
 begin
   select * into tm from teams where id = team;
   if not found then raise exception 'Команда не найдена'; end if;
@@ -356,13 +418,111 @@ begin
   if exists (select 1 from team_members where tournament_id = tm.tournament_id and user_id = uid) then
     raise exception 'Вы уже состоите в команде этого турнира';
   end if;
-  if not tm.is_open and upper(btrim(coalesce(code, ''))) <> (select join_code from team_secrets where team_id = team) then
-    raise exception 'Неверный код команды';
-  end if;
   select count(*) into cnt from team_members where team_id = team;
   if cnt >= r.team_size + r.max_subs then raise exception 'В команде нет свободных мест'; end if;
   insert into team_members (team_id, tournament_id, user_id, role)
   values (team, tm.tournament_id, uid, case when cnt >= r.team_size then 'sub' else 'player' end);
+  delete from free_agents where tournament_id = tm.tournament_id and user_id = uid;
+  delete from team_invites where tournament_id = tm.tournament_id and user_id = uid;
+end $$;
+
+create or replace function public.join_team(team uuid, code text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := public._me(); tm teams;
+begin
+  select * into tm from teams where id = team;
+  if not found then raise exception 'Команда не найдена'; end if;
+  perform public._require_registration(tm.tournament_id);
+  if not tm.is_open and upper(btrim(coalesce(code, ''))) <> (select join_code from team_secrets where team_id = team) then
+    raise exception 'Неверный код команды';
+  end if;
+  perform public._join(team, uid);
+end $$;
+
+-- свободный агент: игрок ищет команду в турнире
+create or replace function public.set_free_agent(t uuid, note text default null) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := public._me();
+begin
+  perform public._require_registration(t);
+  if exists (select 1 from team_members where tournament_id = t and user_id = uid) then
+    raise exception 'Вы уже в команде этого турнира';
+  end if;
+  insert into free_agents (tournament_id, user_id, note) values (t, uid, nullif(btrim(note), ''))
+  on conflict (tournament_id, user_id) do update set note = excluded.note;
+end $$;
+
+create or replace function public.remove_free_agent(t uuid) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  delete from free_agents where tournament_id = t and user_id = public._me();
+end $$;
+
+create or replace function public.invite_player(team uuid, member uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := public._me(); tm teams; r tournaments;
+begin
+  select * into tm from teams where id = team;
+  if not found then raise exception 'Команда не найдена'; end if;
+  if tm.captain_id <> uid then raise exception 'Приглашать может только капитан'; end if;
+  perform public._require_registration(tm.tournament_id);
+  select * into r from tournaments where id = tm.tournament_id;
+  if exists (select 1 from team_members where tournament_id = tm.tournament_id and user_id = member) then
+    raise exception 'Игрок уже в команде этого турнира';
+  end if;
+  if (select count(*) from team_members where team_id = team) >= r.team_size + r.max_subs then
+    raise exception 'В команде нет свободных мест';
+  end if;
+  if not exists (select 1 from profiles where id = member and not is_banned) then raise exception 'Игрок не найден'; end if;
+  insert into team_invites (team_id, tournament_id, user_id) values (team, tm.tournament_id, member)
+  on conflict (team_id, user_id) do nothing;
+end $$;
+
+create or replace function public.cancel_invite(team uuid, member uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare tm teams;
+begin
+  perform public._me();
+  select * into tm from teams where id = team;
+  if tm.captain_id <> auth.uid() and not public.can_manage(tm.tournament_id) then raise exception 'Отменить приглашение может только капитан'; end if;
+  delete from team_invites where team_id = team and user_id = member;
+end $$;
+
+create or replace function public.respond_invite(team uuid, accept boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := public._me();
+begin
+  if not exists (select 1 from team_invites where team_id = team and user_id = uid) then
+    raise exception 'Приглашение не найдено или уже отозвано';
+  end if;
+  if accept then perform public._join(team, uid);
+  else delete from team_invites where team_id = team and user_id = uid; end if;
+end $$;
+
+-- чек-ин: капитан подтверждает, что команда на месте
+create or replace function public.checkin(team uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare uid uuid := public._me(); tm teams; r tournaments;
+begin
+  select * into tm from teams where id = team;
+  if not found then raise exception 'Команда не найдена'; end if;
+  if tm.captain_id <> uid then raise exception 'Подтверждает участие капитан команды'; end if;
+  select * into r from tournaments where id = tm.tournament_id;
+  if r.checkin_minutes is null then raise exception 'В этом турнире нет чек-ина'; end if;
+  if r.stage not in ('registration', 'closed') then raise exception 'Турнир уже начался'; end if;
+  if now() < r.starts_at - make_interval(mins => r.checkin_minutes) then
+    raise exception 'Чек-ин откроется за % мин. до начала', r.checkin_minutes;
+  end if;
+  update teams set checked_in_at = coalesce(checked_in_at, now()) where id = team;
+end $$;
+
+create or replace function public.set_checkin(team uuid, value boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare t uuid;
+begin
+  select tournament_id into t from teams where id = team;
+  perform public._require_manage(t);
+  update teams set checked_in_at = case when value then coalesce(checked_in_at, now()) end where id = team;
 end $$;
 
 -- вступление по коду, без выбора команды из списка
@@ -478,11 +638,17 @@ begin
 end $$;
 
 -- ---------------------------------------------------------------------
--- Сетка и матчи (олимпийская система)
+-- Сетки: олимпийская, двойное выбывание, группы + плей-офф.
+-- Каждый матч знает, куда уходит победитель (next_match_id/next_slot)
+-- и куда падает проигравший (loser_match_id/loser_slot — в двойной сетке).
 -- ---------------------------------------------------------------------
+drop function if exists public._clear_forward(public.matches, uuid);
+drop function if exists public._resolve_byes(uuid);
+drop function if exists public._round_bo(public.tournaments, int, int);
+
 -- порядок посева, чтобы сильнейшие встречались как можно позже: 1,8,4,5,2,7,3,6 ...
 create or replace function public._seed_order(size int) returns int[]
-language plpgsql immutable as $$
+language plpgsql immutable set search_path = '' as $$
 declare o int[] := array[1, 2]; nxt int[]; s int; len int;
 begin
   if size < 2 then return array[1]; end if;
@@ -495,102 +661,279 @@ begin
   return o;
 end $$;
 
-create or replace function public._round_bo(r tournaments, rnd int, total int) returns int
-language sql immutable as $$
-  select case when rnd = total then r.bo_final when rnd = total - 1 then r.bo_semifinal else r.bo_default end
+-- поставить команду в слот матча
+create or replace function public._put(mid uuid, slot text, team uuid) returns void
+language sql security definer set search_path = public as $$
+  update matches set team_a = case when slot = 'a' then team else team_a end,
+                     team_b = case when slot = 'b' then team else team_b end,
+                     updated_at = now()
+  where id = mid
 $$;
 
--- убрать команду из следующих матчей (если результат переигран)
-create or replace function public._clear_forward(m matches, team uuid) returns void
-language plpgsql security definer set search_path = public as $$
-declare nx matches;
+-- слот навсегда пуст: источника нет (проход в 1-м раунде) или источник ничего не отдаст
+create or replace function public._slot_dead(m public.matches, slot text) returns boolean
+language plpgsql stable security definer set search_path = public as $$
+declare f matches;
 begin
-  if team is null then return; end if;
-  select * into nx from matches where tournament_id = m.tournament_id and round = m.round + 1 and position = (m.position + 1) / 2;
-  if not found then return; end if;
-  if nx.winner_id is not null and (nx.team_a = team or nx.team_b = team) then perform public._clear_forward(nx, nx.winner_id); end if;
-  update matches set
-    team_a = case when team_a = team then null else team_a end,
-    team_b = case when team_b = team then null else team_b end,
-    score_a = null, score_b = null, winner_id = null, status = 'pending', is_bye = false,
-    veto = '{"log": []}'::jsonb, updated_at = now()
-  where id = nx.id and (team_a = team or team_b = team);
+  if (slot = 'a' and m.team_a is not null) or (slot = 'b' and m.team_b is not null) then return false; end if;
+  select * into f from matches where next_match_id = m.id and next_slot = slot limit 1;
+  if found then return f.is_bye and f.winner_id is null; end if;   -- пустой матч не даёт победителя
+  select * into f from matches where loser_match_id = m.id and loser_slot = slot limit 1;
+  if found then return f.is_bye; end if;                            -- проход без игры не даёт проигравшего
+  return true;
 end $$;
 
--- провести победителя в следующий раунд
+-- провести победителя дальше, проигравшего — в нижнюю сетку
 create or replace function public._advance(mid uuid) returns void
 language plpgsql security definer set search_path = public as $$
-declare m matches; nx matches;
+declare m matches; loser uuid;
 begin
   select * into m from matches where id = mid;
   if m.winner_id is null then return; end if;
-  select * into nx from matches where tournament_id = m.tournament_id and round = m.round + 1 and position = (m.position + 1) / 2;
-  if not found then
-    update tournaments set stage = 'finished', updated_at = now() where id = m.tournament_id;
-    return;
+  if m.next_match_id is not null then perform public._put(m.next_match_id, m.next_slot, m.winner_id); end if;
+  if not m.is_bye and m.loser_match_id is not null then
+    loser := case when m.winner_id = m.team_a then m.team_b else m.team_a end;
+    perform public._put(m.loser_match_id, m.loser_slot, loser);
   end if;
-  if m.position % 2 = 1 then update matches set team_a = m.winner_id, updated_at = now() where id = nx.id;
-  else update matches set team_b = m.winner_id, updated_at = now() where id = nx.id; end if;
+  if m.next_match_id is null and m.bracket <> 'group' then
+    update tournaments set stage = 'finished', updated_at = now() where id = m.tournament_id;
+  end if;
 end $$;
 
--- автопроход, если соперника нет (bye)
-create or replace function public._resolve_byes(t uuid) returns void
+-- автопроходы: соперника не будет — команда проходит дальше, обоих не будет — матч пустой
+create or replace function public._resolve(t uuid) returns void
 language plpgsql security definer set search_path = public as $$
-declare m matches; changed boolean := true;
+declare mid uuid; m matches; changed boolean := true; da boolean; db boolean;
 begin
   while changed loop
     changed := false;
-    for m in select * from matches where tournament_id = t and round = 1 and status = 'pending'
-             and ((team_a is null) <> (team_b is null)) loop
-      update matches set winner_id = coalesce(team_a, team_b), status = 'finished', is_bye = true, updated_at = now() where id = m.id;
-      perform public._advance(m.id);
-      changed := true;
+    for mid in select id from matches where tournament_id = t and bracket <> 'group' and status <> 'finished' and winner_id is null
+               order by case bracket when 'upper' then 1 when 'lower' then 2 else 3 end, round, position loop
+      select * into m from matches where id = mid;
+      if m.status = 'finished' then continue; end if;
+      da := public._slot_dead(m, 'a'); db := public._slot_dead(m, 'b');
+      if (m.team_a is not null and db) or (m.team_b is not null and da) then
+        update matches set winner_id = coalesce(team_a, team_b), status = 'finished', is_bye = true, updated_at = now() where id = mid;
+        perform public._advance(mid);
+        changed := true;
+      elsif da and db then
+        update matches set status = 'finished', is_bye = true, updated_at = now() where id = mid;
+        changed := true;
+      end if;
     end loop;
   end loop;
 end $$;
 
+-- откат: убрать из следующих матчей всё, что туда ушло из этого матча
+create or replace function public._remove(mid uuid, slot text) returns void
+language plpgsql security definer set search_path = public as $$
+declare nx matches;
+begin
+  select * into nx from matches where id = mid;
+  if not found then return; end if;
+  if nx.winner_id is not null then perform public._unwind(mid); end if;
+  update matches set
+    team_a = case when slot = 'a' then null else team_a end,
+    team_b = case when slot = 'b' then null else team_b end,
+    score_a = null, score_b = null, winner_id = null, status = 'pending', is_bye = false,
+    veto = '{"log": []}'::jsonb, updated_at = now()
+  where id = mid;
+end $$;
+
+create or replace function public._unwind(mid uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare m matches;
+begin
+  select * into m from matches where id = mid;
+  if m.winner_id is null then return; end if;
+  if m.next_match_id is not null then perform public._remove(m.next_match_id, m.next_slot); end if;
+  if not m.is_bye and m.loser_match_id is not null then perform public._remove(m.loser_match_id, m.loser_slot); end if;
+  if m.next_match_id is null and m.bracket <> 'group' then
+    update tournaments set stage = 'ongoing', updated_at = now() where id = m.tournament_id and stage = 'finished';
+  end if;
+end $$;
+
+-- олимпийская (dbl = false) или двойная сетка из упорядоченного списка команд
+create or replace function public._build_elim(t uuid, ids uuid[], dbl boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  r tournaments; n int := coalesce(array_length(ids, 1), 0); size int := 2; k int := 1; ord int[];
+  rnd int; pos int; cnt int; a int; b int; j int; gf uuid; lr int; lcnt int; bo int;
+begin
+  select * into r from tournaments where id = t;
+  while size < n loop size := size * 2; k := k + 1; end loop;
+  if size < 4 then dbl := false; end if;
+  ord := public._seed_order(size);
+
+  -- верхняя сетка (в олимпийской системе — единственная)
+  for rnd in 1..k loop
+    cnt := size >> rnd;
+    bo := case when rnd = k then (case when dbl then r.bo_semifinal else r.bo_final end)
+               when rnd = k - 1 and not dbl then r.bo_semifinal else r.bo_default end;
+    for pos in 1..cnt loop
+      if rnd = 1 then
+        a := ord[pos * 2 - 1]; b := ord[pos * 2];
+        insert into matches (tournament_id, bracket, round, position, team_a, team_b, best_of)
+        values (t, 'upper', 1, pos, case when a <= n then ids[a] end, case when b <= n then ids[b] end, bo);
+      else
+        insert into matches (tournament_id, bracket, round, position, best_of) values (t, 'upper', rnd, pos, bo);
+      end if;
+    end loop;
+  end loop;
+  update matches m set next_match_id = nx.id, next_slot = case when m.position % 2 = 1 then 'a' else 'b' end
+  from matches nx
+  where m.tournament_id = t and nx.tournament_id = t and m.bracket = 'upper' and nx.bracket = 'upper'
+    and nx.round = m.round + 1 and nx.position = (m.position + 1) / 2;
+
+  if not dbl then return; end if;
+
+  -- нижняя сетка: 2(k-1) раундов; нечётные — встречи внутри нижней сетки, чётные — сюда падают проигравшие сверху
+  lr := 2 * (k - 1);
+  for rnd in 1..lr loop
+    j := (rnd + 1) / 2;
+    lcnt := size >> (j + 1);
+    for pos in 1..lcnt loop
+      insert into matches (tournament_id, bracket, round, position, best_of)
+      values (t, 'lower', rnd, pos, case when rnd = lr then r.bo_semifinal else r.bo_default end);
+    end loop;
+  end loop;
+  insert into matches (tournament_id, bracket, round, position, best_of) values (t, 'grand', 1, 1, r.bo_final) returning id into gf;
+
+  -- проигравшие первого раунда верхней сетки
+  update matches m set loser_match_id = l.id, loser_slot = case when m.position % 2 = 1 then 'a' else 'b' end
+  from matches l
+  where m.tournament_id = t and l.tournament_id = t and m.bracket = 'upper' and m.round = 1
+    and l.bracket = 'lower' and l.round = 1 and l.position = (m.position + 1) / 2;
+  -- проигравшие следующих раундов верхней сетки (через раз в обратном порядке, чтобы не было повторных встреч)
+  for j in 1..k - 1 loop
+    lcnt := size >> (j + 1);
+    update matches m set loser_match_id = l.id, loser_slot = 'b'
+    from matches l
+    where m.tournament_id = t and l.tournament_id = t and m.bracket = 'upper' and m.round = j + 1
+      and l.bracket = 'lower' and l.round = 2 * j
+      and l.position = case when j % 2 = 1 then lcnt + 1 - m.position else m.position end;
+  end loop;
+  -- победители нижней сетки
+  update matches m set next_match_id = l.id, next_slot = 'a'
+  from matches l
+  where m.tournament_id = t and l.tournament_id = t and m.bracket = 'lower' and m.round % 2 = 1
+    and l.bracket = 'lower' and l.round = m.round + 1 and l.position = m.position;
+  update matches m set next_match_id = l.id, next_slot = case when m.position % 2 = 1 then 'a' else 'b' end
+  from matches l
+  where m.tournament_id = t and l.tournament_id = t and m.bracket = 'lower' and m.round % 2 = 0 and m.round < lr
+    and l.bracket = 'lower' and l.round = m.round + 1 and l.position = (m.position + 1) / 2;
+  -- финалы сеток → гранд-финал
+  update matches set next_match_id = gf, next_slot = 'a' where tournament_id = t and bracket = 'upper' and round = k;
+  update matches set next_match_id = gf, next_slot = 'b' where tournament_id = t and bracket = 'lower' and round = lr;
+end $$;
+
+-- групповой этап: группы змейкой по посеву, круговой турнир внутри группы
+create or replace function public._build_groups(t uuid, ids uuid[]) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  r tournaments; n int := array_length(ids, 1); g int; gi int; arr uuid[]; m int;
+  rnd int; i int; pos int; x uuid; y uuid;
+begin
+  select * into r from tournaments where id = t;
+  g := greatest(1, least(r.group_count, n / 2));
+  for gi in 1..g loop
+    select array_agg(ids[q] order by q) into arr from generate_series(1, n) gs(q)
+    where (case when ((q - 1) / g) % 2 = 0 then (q - 1) % g + 1 else g - (q - 1) % g end) = gi;
+    m := array_length(arr, 1);
+    if m % 2 = 1 then arr := arr || null::uuid; m := m + 1; end if;
+    for rnd in 1..m - 1 loop
+      pos := 0;
+      for i in 1..m / 2 loop
+        x := arr[i]; y := arr[m + 1 - i];
+        if x is not null and y is not null then
+          pos := pos + 1;
+          insert into matches (tournament_id, bracket, group_no, round, position, team_a, team_b, best_of)
+          values (t, 'group', gi, rnd, pos, x, y, r.bo_default);
+        end if;
+      end loop;
+      arr := array[arr[1]] || arr[m:m] || arr[2:m - 1];   -- круговой метод: первая команда стоит, остальные вращаются
+    end loop;
+  end loop;
+end $$;
+
+-- таблица групп: победы, разница счёта, место
+create or replace function public.group_standings(t uuid)
+returns table (group_no int, team_id uuid, played int, wins int, losses int, diff int, place int)
+language sql stable security definer set search_path = public as $$
+  with gm as (select * from matches where tournament_id = t and bracket = 'group' and public.t_visible(t)),
+  ti as (select distinct x.group_no, x.team_id from (select group_no, team_a as team_id from gm union all select group_no, team_b from gm) x where x.team_id is not null),
+  rows as (
+    select ti.group_no, ti.team_id,
+      count(m.id) filter (where m.status = 'finished' and not m.is_bye)::int as played,
+      count(m.id) filter (where m.winner_id = ti.team_id)::int as wins,
+      count(m.id) filter (where m.status = 'finished' and m.winner_id is not null and m.winner_id <> ti.team_id)::int as losses,
+      coalesce(sum(case when m.status <> 'finished' or m.score_a is null then 0
+                        when m.team_a = ti.team_id then m.score_a - m.score_b else m.score_b - m.score_a end), 0)::int as diff
+    from ti left join gm m on m.group_no = ti.group_no and ti.team_id in (m.team_a, m.team_b)
+    group by ti.group_no, ti.team_id)
+  select r.group_no, r.team_id, r.played, r.wins, r.losses, r.diff,
+         (row_number() over (partition by r.group_no order by r.wins desc, r.diff desc, tm.seed nulls last, tm.created_at))::int
+  from rows r join teams tm on tm.id = r.team_id
+$$;
+
 -- seeds: id команд по порядку посева (null — порядок регистрации), shuffle — случайный посев
 create or replace function public.generate_bracket(t uuid, seeds uuid[] default null, shuffle boolean default false) returns void
 language plpgsql security definer set search_path = public as $$
-declare
-  r tournaments; ids uuid[]; n int; size int := 2; rounds int := 1; ord int[];
-  rnd int; pos int; cnt int; a int; b int;
+declare r tournaments; ids uuid[]; pool uuid[]; n int;
 begin
   perform public._require_manage(t);
   select * into r from tournaments where id = t;
+  -- участвуют все команды, а при включённом чек-ине — только подтвердившие участие
+  select array_agg(id order by created_at) into pool from teams
+  where tournament_id = t and (r.checkin_minutes is null or checked_in_at is not null);
+  pool := coalesce(pool, array[]::uuid[]);
   if seeds is not null and array_length(seeds, 1) > 0 then
-    select array_agg(s order by i) into ids from unnest(seeds) with ordinality u(s, i)
-    where exists (select 1 from teams where id = s and tournament_id = t);
-    ids := coalesce(ids, array[]::uuid[]) || coalesce((select array_agg(id order by created_at) from teams
-           where tournament_id = t and not (id = any (coalesce(ids, array[]::uuid[])))), array[]::uuid[]);
+    select array_agg(s order by i) into ids from unnest(seeds) with ordinality u(s, i) where s = any (pool);
+    ids := coalesce(ids, array[]::uuid[]);
+    ids := ids || coalesce((select array_agg(x order by o) from unnest(pool) with ordinality p(x, o) where not (x = any (ids))), array[]::uuid[]);
   elsif shuffle then
-    select array_agg(id order by random()) into ids from teams where tournament_id = t;
+    select array_agg(x order by random()) into ids from unnest(pool) x;
   else
-    select array_agg(id order by created_at) into ids from teams where tournament_id = t;
+    ids := pool;
   end if;
   n := coalesce(array_length(ids, 1), 0);
-  if n < 2 then raise exception 'Для сетки нужно минимум 2 команды'; end if;
-  while size < n loop size := size * 2; rounds := rounds + 1; end loop;
-  ord := public._seed_order(size);
+  if n < 2 then
+    raise exception '%', case when r.checkin_minutes is not null then 'Для сетки нужно минимум 2 команды, прошедшие чек-ин'
+                              else 'Для сетки нужно минимум 2 команды' end;
+  end if;
+  if r.format = 'groups' and n < 3 then raise exception 'Для группового этапа нужно минимум 3 команды'; end if;
 
   delete from matches where tournament_id = t;
   update teams set seed = null where tournament_id = t;
   for i in 1..n loop update teams set seed = i where id = ids[i]; end loop;
 
-  for rnd in 1..rounds loop
-    cnt := size / (2 ^ rnd)::int;
-    for pos in 1..cnt loop
-      if rnd = 1 then
-        a := ord[pos * 2 - 1]; b := ord[pos * 2];
-        insert into matches (tournament_id, round, position, team_a, team_b, best_of)
-        values (t, 1, pos, case when a <= n then ids[a] end, case when b <= n then ids[b] end, public._round_bo(r, 1, rounds));
-      else
-        insert into matches (tournament_id, round, position, best_of) values (t, rnd, pos, public._round_bo(r, rnd, rounds));
-      end if;
-    end loop;
-  end loop;
-  perform public._resolve_byes(t);
+  if r.format = 'groups' then
+    perform public._build_groups(t, ids);
+  else
+    perform public._build_elim(t, ids, r.format = 'double');
+    perform public._resolve(t);
+  end if;
   update tournaments set stage = 'ongoing', updated_at = now() where id = t and stage in ('registration', 'closed');
+end $$;
+
+-- плей-офф по итогам групп: лучшие из каждой группы, победители групп — против вторых мест других групп
+create or replace function public.generate_playoff(t uuid) returns void
+language plpgsql security definer set search_path = public as $$
+declare r tournaments; ids uuid[];
+begin
+  perform public._require_manage(t);
+  select * into r from tournaments where id = t;
+  if r.format <> 'groups' then raise exception 'Плей-офф из групп есть только в формате «Группы + плей-офф»'; end if;
+  if not exists (select 1 from matches where tournament_id = t and bracket = 'group') then raise exception 'Сначала сформируйте группы'; end if;
+  if exists (select 1 from matches where tournament_id = t and bracket = 'group' and status <> 'finished') then
+    raise exception 'Ещё не все матчи групп сыграны';
+  end if;
+  select array_agg(team_id order by place, group_no) into ids from public.group_standings(t) where place <= r.group_advance;
+  if coalesce(array_length(ids, 1), 0) < 2 then raise exception 'В плей-офф выходит меньше двух команд'; end if;
+  delete from matches where tournament_id = t and bracket <> 'group';
+  perform public._build_elim(t, ids, false);
+  perform public._resolve(t);
+  update tournaments set stage = 'ongoing', updated_at = now() where id = t;
 end $$;
 
 create or replace function public.update_match(mid uuid, p jsonb) returns void
@@ -624,9 +967,11 @@ begin
   if m.team_a is null or m.team_b is null then raise exception 'В матче ещё нет обеих команд'; end if;
   if sa is null or sb is null or sa < 0 or sb < 0 or sa = sb then raise exception 'Укажите счёт без ничьей'; end if;
   w := case when sa > sb then m.team_a else m.team_b end;
-  if m.winner_id is not null and m.winner_id <> w then perform public._clear_forward(m, m.winner_id); end if;
-  update matches set score_a = sa, score_b = sb, winner_id = w, status = 'finished', updated_at = now() where id = mid;
-  perform public._advance(mid);
+  -- победитель сменился: убрать прежнего из следующих матчей (и проигравшего из нижней сетки)
+  if m.winner_id is not null and m.winner_id <> w then perform public._unwind(mid); end if;
+  update matches set score_a = sa, score_b = sb, winner_id = w, status = 'finished', is_bye = false, updated_at = now() where id = mid;
+  if m.winner_id is distinct from w then perform public._advance(mid); end if;
+  perform public._resolve(m.tournament_id);
 end $$;
 
 create or replace function public.reset_result(mid uuid) returns void
@@ -636,9 +981,9 @@ begin
   select * into m from matches where id = mid;
   if not found then raise exception 'Матч не найден'; end if;
   perform public._require_manage(m.tournament_id);
-  perform public._clear_forward(m, m.winner_id);
-  update matches set score_a = null, score_b = null, winner_id = null, status = 'pending', is_bye = false, updated_at = now() where id = mid;
-  update tournaments set stage = 'ongoing' where id = m.tournament_id and stage = 'finished';
+  if m.is_bye then raise exception 'Проход без игры нельзя сбросить — пересоздайте сетку'; end if;
+  perform public._unwind(mid);
+  update matches set score_a = null, score_b = null, winner_id = null, status = 'pending', updated_at = now() where id = mid;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -725,7 +1070,8 @@ end $$;
 -- ---------------------------------------------------------------------
 -- Каталог: карточки турниров с числом команд и организатором
 -- ---------------------------------------------------------------------
-create or replace view public.tournament_cards with (security_invoker = true) as
+drop view if exists public.tournament_cards;
+create view public.tournament_cards with (security_invoker = true) as
 select t.*,
        p.nickname   as organizer_nickname,
        p.avatar_url as organizer_avatar,
@@ -733,6 +1079,30 @@ select t.*,
        (select count(*) from public.teams x where x.tournament_id = t.id)::int as teams_count
 from public.tournaments t
 join public.profiles p on p.id = t.organizer_id;
+
+-- ---------------------------------------------------------------------
+-- Статистика игроков: сыгранные матчи, победы, финалы, титулы и очки рейтинга
+-- Очки: победа в матче +3, выход в финал +3, титул +10. Учитываются только опубликованные турниры.
+-- ---------------------------------------------------------------------
+drop view if exists public.player_stats;
+create view public.player_stats with (security_invoker = true) as
+with played as (
+  select tm.user_id, m.tournament_id, (m.winner_id = tm.team_id) as won,
+         (m.next_match_id is null and m.bracket <> 'group') as is_final
+  from public.matches m
+  join public.team_members tm on tm.team_id in (m.team_a, m.team_b)
+  where m.status = 'finished' and not m.is_bye and m.winner_id is not null
+), agg as (
+  select user_id, count(*)::int as matches, count(*) filter (where won)::int as wins,
+         count(*) filter (where is_final)::int as finals, count(*) filter (where is_final and won)::int as titles
+  from played group by user_id
+)
+select p.id as user_id, p.steam_id, p.nickname, p.avatar_url, p.country, p.faceit_level,
+       (select count(*) from public.team_members x where x.user_id = p.id)::int as tournaments,
+       coalesce(a.matches, 0) as matches, coalesce(a.wins, 0) as wins,
+       coalesce(a.finals, 0) as finals, coalesce(a.titles, 0) as titles,
+       coalesce(a.wins, 0) * 3 + coalesce(a.finals, 0) * 3 + coalesce(a.titles, 0) * 10 as points
+from public.profiles p left join agg a on a.user_id = p.id;
 
 -- ---------------------------------------------------------------------
 -- Права доступа (RLS): читать можно опубликованное, писать — только через функции выше
@@ -745,6 +1115,8 @@ alter table public.team_secrets     enable row level security;
 alter table public.team_members     enable row level security;
 alter table public.matches          enable row level security;
 alter table public.announcements    enable row level security;
+alter table public.free_agents      enable row level security;
+alter table public.team_invites     enable row level security;
 
 drop policy if exists profiles_read on public.profiles;
 create policy profiles_read on public.profiles for select using (true);
@@ -756,6 +1128,12 @@ create policy contacts_read on public.profile_contacts for select using (
              where a.user_id = auth.uid() and b.user_id = profile_contacts.user_id)
   or exists (select 1 from public.team_members m join public.tournaments t on t.id = m.tournament_id
              where m.user_id = profile_contacts.user_id and t.organizer_id = auth.uid())
+  -- свободного агента видят капитаны команд этого турнира
+  or exists (select 1 from public.free_agents fa join public.teams c on c.tournament_id = fa.tournament_id
+             where fa.user_id = profile_contacts.user_id and c.captain_id = auth.uid())
+  -- приглашённый видит контакты капитана, который его позвал
+  or exists (select 1 from public.team_invites i join public.teams c on c.id = i.team_id
+             where i.user_id = auth.uid() and c.captain_id = profile_contacts.user_id)
 );
 
 drop policy if exists tournaments_read on public.tournaments;
@@ -771,12 +1149,20 @@ drop policy if exists matches_read on public.matches;
 create policy matches_read on public.matches for select using (public.t_visible(tournament_id));
 drop policy if exists announcements_read on public.announcements;
 create policy announcements_read on public.announcements for select using (public.t_visible(tournament_id));
+drop policy if exists free_agents_read on public.free_agents;
+create policy free_agents_read on public.free_agents for select using (public.t_visible(tournament_id));
+drop policy if exists invites_read on public.team_invites;
+create policy invites_read on public.team_invites for select using (
+  user_id = auth.uid() or public.can_manage(tournament_id)
+  or exists (select 1 from public.teams c where c.id = team_id and c.captain_id = auth.uid())
+);
 -- team_secrets: политик нет — читать напрямую нельзя никому
 
 -- запись в таблицы напрямую запрещена: только select
 revoke insert, update, delete, truncate on all tables in schema public from anon, authenticated;
 grant select on public.profiles, public.profile_contacts, public.tournaments, public.teams, public.team_members,
-                public.matches, public.announcements, public.tournament_cards to anon, authenticated;
+                public.matches, public.announcements, public.tournament_cards, public.player_stats,
+                public.free_agents, public.team_invites to anon, authenticated;
 revoke all on public.team_secrets from anon, authenticated;
 
 -- функции: вызывать могут только вошедшие пользователи, служебные (с подчёркиванием) — никто
@@ -784,13 +1170,8 @@ do $$
 declare f record;
 begin
   for f in select p.oid::regprocedure as sig, p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-           where n.nspname = 'public' and p.prokind = 'f'
-             and p.proname in ('is_admin','can_manage','t_visible','_me','_require_manage','_new_code','_clean_url','update_profile',
-               '_apply_tournament','create_tournament','update_tournament','set_stage','moderate_tournament','delete_tournament',
-               'set_admin','set_banned','_require_registration','create_team','join_team','join_by_code','get_team_code','update_team',
-               '_rebalance','leave_team','kick_member','transfer_captain','disband_team','_seed_order','_round_bo','_clear_forward','_advance',
-               '_resolve_byes','generate_bracket','update_match','report_result','reset_result','veto_sequence','veto_action',
-               'reset_veto','add_announcement','delete_announcement') loop
+           left join pg_depend d on d.objid = p.oid and d.deptype = 'e'
+           where n.nspname = 'public' and p.prokind = 'f' and d.objid is null loop
     execute format('revoke all on function %s from public, anon, authenticated', f.sig);
     if left(f.proname, 1) <> '_' then
       execute format('grant execute on function %s to authenticated', f.sig);
@@ -798,12 +1179,12 @@ begin
   end loop;
 end $$;
 -- проверки прав используются политиками чтения — они должны работать и для гостей
-grant execute on function public.is_admin(), public.can_manage(uuid), public.t_visible(uuid), public.veto_sequence(int, int) to anon, authenticated;
+grant execute on function public.is_admin(), public.can_manage(uuid), public.t_visible(uuid), public.veto_sequence(int, int),
+  public.group_standings(uuid) to anon, authenticated;
 
 -- чистые функции не зависят от схемы поиска
 alter function public._clean_url(text) set search_path = '';
 alter function public._new_code() set search_path = '';
-alter function public._round_bo(public.tournaments, int, int) set search_path = '';
 alter function public._seed_order(int) set search_path = '';
 alter function public.veto_sequence(int, int) set search_path = '';
 
@@ -814,10 +1195,31 @@ do $$
 declare tbl text;
 begin
   if exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
-    foreach tbl in array array['matches', 'teams', 'team_members', 'announcements', 'tournaments'] loop
+    foreach tbl in array array['matches', 'teams', 'team_members', 'announcements', 'tournaments', 'free_agents', 'team_invites'] loop
       if not exists (select 1 from pg_publication_tables where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = tbl) then
         execute format('alter publication supabase_realtime add table public.%I', tbl);
       end if;
     end loop;
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- Хранилище картинок (логотипы, обложки): каждый загружает только в свою папку
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if exists (select 1 from pg_namespace where nspname = 'storage') then
+    insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+    values ('media', 'media', true, 2097152, array['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+    on conflict (id) do update set public = true, file_size_limit = excluded.file_size_limit, allowed_mime_types = excluded.allowed_mime_types;
+    execute 'drop policy if exists media_insert on storage.objects';
+    execute $p$create policy media_insert on storage.objects for insert to authenticated
+             with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text)$p$;
+    execute 'drop policy if exists media_update on storage.objects';
+    execute $p$create policy media_update on storage.objects for update to authenticated
+             using (bucket_id = 'media' and owner = auth.uid())$p$;
+    execute 'drop policy if exists media_delete on storage.objects';
+    execute $p$create policy media_delete on storage.objects for delete to authenticated
+             using (bucket_id = 'media' and owner = auth.uid())$p$;
   end if;
 end $$;
