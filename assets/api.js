@@ -295,7 +295,7 @@
   //  ДЕМО: те же функции, данные хранятся в браузере
   // =====================================================================
   function demoApi() {
-    const KEY = 'organizm_demo_v2';
+    const KEY = 'organizm_demo_v3';
     let db;
     try { db = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (_) { db = null; }
     const listeners = new Set();
@@ -441,7 +441,9 @@
       const keys = ['title', 'description', 'rules', 'prize', 'entry_fee', 'region', 'banner_url', 'contact_url', 'starts_at', 'reg_closes_at', 'max_teams', 'max_subs', 'bo_default', 'bo_semifinal', 'bo_final', 'map_pool', 'mode', 'format', 'group_count', 'group_advance', 'checkin_minutes'];
       if (p.mode && p.mode !== t.mode && db.teams.some(x => x.tournament_id === t.id)) fail('Режим нельзя менять, когда уже есть команды');
       if (p.format && p.format !== t.format && db.matches.some(m => m.tournament_id === t.id)) fail('Формат сетки нельзя менять, когда сетка уже создана');
-      if (p.map_pool && (p.map_pool.length < 5 || p.map_pool.length > 10)) fail('В пуле должно быть от 5 до 10 карт');
+      const newMode = p.mode || t.mode;
+      if (p.map_pool && (p.map_pool.length < 5 || p.map_pool.length > 10) && !(newMode === '1v1' && p.map_pool.length <= 1)) fail('В пуле должно быть от 5 до 10 карт');
+      if (newMode !== '1v1' && (p.map_pool || t.map_pool || []).length < 5) fail('Без выбора карт можно провести только турнир 1 на 1 — выберите от 5 до 10 карт');
       for (const k of keys) if (k in p) t[k] = p[k] === '' ? null : p[k];
       t.team_size = t.mode === '5v5' ? 5 : t.mode === '2v2' ? 2 : 1;
       if (t.mode === '1v1') t.max_subs = 0;
@@ -472,7 +474,7 @@
       return ms.map(m => ({ ...m, A: tm(m.team_a), B: tm(m.team_b), mine: myIds.includes(m.team_a) ? m.team_a : m.team_b, tournament: db.tournaments.find(t => t.id === m.tournament_id) }));
     }
 
-    if (!db || db.v !== 2) { db = seed(); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) {} }
+    if (!db || db.v !== 3) { db = seed(); try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (_) {} }
 
     const api = {
       demo: true,
@@ -662,6 +664,7 @@
         const u = needMe(), m = M(mid), t = T(m.tournament_id);
         (m.team_a && m.team_b) || fail('В матче ещё нет обеих команд');
         m.status !== 'finished' || fail('Матч уже сыгран');
+        t.map_pool.length >= 2 || fail('В этом турнире нет пиков и банов — карту назначает организатор');
         const seq = vetoSequence(m.best_of, t.map_pool.length), step = m.veto.log.length;
         step < seq.length || fail('Пики и баны уже завершены');
         const side = step % 2 === 0 ? 'A' : 'B';
@@ -730,7 +733,7 @@
         'aZ1z', 'Nomad', 'Vint', 'Sk1f', 'Bober', 'Frosty', 'Hydra', 'Rocket', 'k1nG', 'TaToo', 'Zver', 'Echo', 'Blaze', 'Oxide', 'Rapid', 'Venom', 'S1ren', 'Q-Ball', 'Tesla', 'Grom', 'Yeti', 'Orion', 'Marlin', 'Spike', 'Tundra', 'Comet', 'Flint', 'Ranger', 'Viper', 'Pixel', 'Storm', 'Neon', 'Raven', 'Cobra', 'Hawk', 'Bison'];
       const profiles = [{ id: 'me', steam_id: '76561198000000000', nickname: 'Вы (демо)', avatar_url: null, profile_url: 'https://steamcommunity.com/', country: 'RU', faceit_level: 8, premier_rating: 17400, faceit_url: null, bio: 'Демо-аккаунт: у него права администратора, чтобы показать все функции.', is_admin: true, is_banned: false, created_at: iso(t0 - 30 * day) }];
       nicks.forEach((n, i) => profiles.push({ id: 'p' + i, steam_id: '765611980' + String(10000000 + i * 7919).padStart(8, '0'), nickname: n, avatar_url: null, profile_url: 'https://steamcommunity.com/', country: 'RU', faceit_level: 1 + (i * 7) % 10, premier_rating: 8000 + (i * 1373) % 17000, faceit_url: null, bio: null, is_admin: false, is_banned: false, created_at: iso(t0 - (60 - i) * day) }));
-      db = { v: 2, session: null, profiles, tournaments: [], teams: [], members: [], matches: [], announcements: [], agents: [], invites: [], contacts: { me: { discord: 'demo_player', telegram: '@demo' }, p40: { discord: 'orion_awp', telegram: null }, p41: { discord: 'marlin#7', telegram: '@marlin' } } };
+      db = { v: 3, session: null, profiles, tournaments: [], teams: [], members: [], matches: [], announcements: [], agents: [], invites: [], contacts: { me: { discord: 'demo_player', telegram: '@demo' }, p40: { discord: 'orion_awp', telegram: null }, p41: { discord: 'marlin#7', telegram: '@marlin' } } };
       let pi = 0, ti = 0;
       const nextP = () => profiles[1 + (pi++ % 40)].id;
       const RULES = '1. Матчи играются на серверах организатора, античит обязателен.\n2. Опоздание более 15 минут — техническое поражение.\n3. Пики и баны проходят на сайте до начала матча.\n4. Споры решает главный судья, его решение окончательное.';
@@ -796,6 +799,11 @@
       for (let i = 0; i < 8; i++) { const cap = nextP(); solo.push(mkTeam(t5, profiles.find(p => p.id === cap).nickname, null, 1, cap)); }
       buildElim(t5, seedAll(t5, solo), false);
       playUntil(t5, 7, m => (m.round + m.position) % 2 === 1);
+
+      // аим-турнир 1 на 1 без выбора карт
+      const ta = mkT({ title: 'Aim Duel Cup', mode: '1v1', team_size: 1, max_subs: 0, starts_at: iso(t0 + 3 * day), max_teams: 16, map_pool: ['aim_map'], bo_default: 1, bo_semifinal: 1, bo_final: 3, organizer_id: 'p5', prize: '5 000 ₽',
+        description: 'Дуэли 1 на 1 на aim_map. Пиков и банов нет — все матчи играются на одной карте до 16 убийств.' });
+      for (let i = 0; i < 6; i++) { const cap = nextP(); mkTeam(ta, profiles.find(p => p.id === cap).nickname, null, 1, cap); }
 
       // 6. скоро старт, открыт чек-ин, демо-пользователь — капитан
       const t6 = mkT({ title: 'Кубок новичков', starts_at: iso(t0 + 25 * 6e4), checkin_minutes: 30, max_teams: 8, organizer_id: 'me', prize: 'Медали и роли в Discord', description: 'Для игроков до 10 уровня FACEIT. Чек-ин за 30 минут до старта — команды без чек-ина в сетку не попадут.' });

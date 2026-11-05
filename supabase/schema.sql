@@ -250,8 +250,11 @@ declare
   new_mode text := coalesce(p->>'mode', (select mode from tournaments where id = t));
 begin
   if p ? 'map_pool' then
-    select array_agg(distinct btrim(x)) into pool from jsonb_array_elements_text(p->'map_pool') x where btrim(x) <> '';
-    if coalesce(array_length(pool, 1), 0) not between 5 and 10 then raise exception 'В пуле должно быть от 5 до 10 карт'; end if;
+    select coalesce(array_agg(distinct left(btrim(x), 32)), array[]::text[]) into pool from jsonb_array_elements_text(p->'map_pool') x where btrim(x) <> '';
+    -- 1 на 1 можно провести без выбора карт: пул пустой (карту назначает организатор) или одна аим-карта
+    if coalesce(array_length(pool, 1), 0) not between 5 and 10 and not (new_mode = '1v1' and coalesce(array_length(pool, 1), 0) <= 1) then
+      raise exception 'В пуле должно быть от 5 до 10 карт';
+    end if;
   end if;
   if not is_new and has_teams and p ? 'mode' and p->>'mode' <> (select mode from tournaments where id = t) then
     raise exception 'Режим нельзя менять, когда уже есть команды';
@@ -287,6 +290,9 @@ begin
   where id = t;
   if (select max_teams < (select count(*) from teams where tournament_id = t) from tournaments where id = t) then
     raise exception 'Команд уже больше, чем новый лимит';
+  end if;
+  if (select mode <> '1v1' and coalesce(array_length(map_pool, 1), 0) < 5 from tournaments where id = t) then
+    raise exception 'Без выбора карт можно провести только турнир 1 на 1 — выберите от 5 до 10 карт';
   end if;
 end $$;
 
@@ -1017,6 +1023,7 @@ begin
   select * into r from tournaments where id = m.tournament_id;
   if m.team_a is null or m.team_b is null then raise exception 'В матче ещё нет обеих команд'; end if;
   if m.status = 'finished' then raise exception 'Матч уже сыгран'; end if;
+  if coalesce(array_length(r.map_pool, 1), 0) < 2 then raise exception 'В этом турнире нет пиков и банов — карту назначает организатор'; end if;
   seq := public.veto_sequence(m.best_of, array_length(r.map_pool, 1));
   step := jsonb_array_length(m.veto->'log');
   if step >= array_length(seq, 1) then raise exception 'Пики и баны уже завершены'; end if;

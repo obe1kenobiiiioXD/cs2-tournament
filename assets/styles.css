@@ -465,3 +465,15 @@ label.btn { cursor: pointer; }
 .dcard .grow { min-width: 180px; }
 .dcard .kicker { letter-spacing: .05em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dcard .grow > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* аим-турниры */
+.aim-hero { position: relative; border-bottom: 1px solid var(--line); overflow: hidden;
+  background: radial-gradient(ellipse at 85% 50%, rgba(242,169,0,.16), transparent 55%), linear-gradient(180deg, #121418, var(--bg)); }
+.aim-hero::after { content: ''; position: absolute; right: 8%; top: 50%; width: 260px; height: 260px; margin-top: -130px; border-radius: 50%;
+  border: 2px solid var(--accent-line); box-shadow: 0 0 0 40px rgba(242,169,0,.04), 0 0 0 80px rgba(242,169,0,.03);
+  background: radial-gradient(circle, var(--accent) 0 5px, transparent 6px), linear-gradient(var(--accent-line), var(--accent-line)) center / 2px 100% no-repeat, linear-gradient(90deg, var(--accent-line), var(--accent-line)) center / 100% 2px no-repeat; }
+.aim-hero .wrap { position: relative; z-index: 1; padding-top: 50px; padding-bottom: 44px; }
+.aim-hero h1 { font-size: 52px; text-transform: uppercase; margin: 8px 0 12px; }
+.aim-hero h1 span { color: var(--accent); }
+.aim-hero p { max-width: 560px; color: var(--muted); margin-bottom: 22px; }
+@media (max-width: 720px) { .aim-hero::after { display: none; } .aim-hero h1 { font-size: 36px; } .aim-hero .wrap { padding-top: 34px; padding-bottom: 30px; } }

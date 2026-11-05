@@ -77,6 +77,9 @@
     if (left === 2) return 'Четвертьфинал';
     return '1/' + 2 ** left + ' финала';
   }
+  const noVeto = t => (t.map_pool || []).length < 5;
+  const AIM_MAPS = ['aim_map', 'aim_redline', 'aim_botz', 'aim_ag_texture2', 'aim_map_usp', 'awp_lego_2', 'awp_india', 'fy_pool_day'];
+  const isAim = t => t.mode === '1v1';
   const FORMATS = { single: 'Олимпийская система', double: 'Двойное выбывание', groups: 'Группы + плей-офф' };
   const fmtName = t => FORMATS[t.format || 'single'];
   const groupLetter = n => String.fromCharCode(64 + n);
@@ -266,7 +269,7 @@
           <div>${I.cal}<b>${esc(fmtDate(t.starts_at))}</b></div>
           <div>${I.prize}<b>${esc(t.prize || 'Без призов')}</b></div>
           <div>${I.globe}<b>${esc(t.region)}</b></div>
-          <div>${I.users}<b>${esc(boLabel(t))}</b></div>
+          <div>${I.users}<b>${esc(isAim(t) && noVeto(t) ? (t.map_pool[0] || 'Карта от организатора') : boLabel(t))}</b></div>
         </div>
         <div class="slots"><div class="lbl"><span>${t.mode === '1v1' ? 'Игроков' : 'Команд'}: <b style="color:var(--text)">${t.teams_count}</b> из ${t.max_teams}</span><span>${t.stage === 'registration' || t.stage === 'closed' ? relTime(t.starts_at) : ''}</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>
       </div>
@@ -300,6 +303,38 @@
     $$('[data-inv-yes]', box).forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invYes, true), 'Вы в команде!')) render(); });
     $$('[data-inv-no]', box).forEach(b => b.onclick = async () => { if (await act(() => api.respondInvite(b.dataset.invNo, false), 'Приглашение отклонено')) render(); });
     $$('[data-checkin]', box).forEach(b => b.onclick = async () => { if (await act(() => api.checkin(b.dataset.checkin), 'Участие подтверждено')) render(); });
+  }
+
+
+  // =================== аим-турниры ===================
+  const aimState = { filter: 'actual' };
+  async function viewAim() {
+    setTitle('Аим-турниры');
+    app.innerHTML = `<section class="aim-hero"><div class="wrap">
+        <div class="kicker">Дуэли 1 на 1</div>
+        <h1>Аим-<span>турниры</span></h1>
+        <p>Турниры один на один: чистая стрельба без командной тактики. Можно играть на aim-картах без пиков и банов — организатор просто указывает карту.</p>
+        <div class="row"><a class="btn pri lg" href="#/create/aim">${I.plus}Создать аим-турнир</a></div>
+      </div></section>
+      <section class="section"><div class="wrap">
+        <div class="filters"><div class="seg" id="aseg2"><button data-f="actual">Актуальные</button><button data-f="reg">Регистрация</button><button data-f="live">Идут</button><button data-f="past">Прошедшие</button></div></div>
+        <div id="agrid">${skeleton(3)}</div>
+      </div></section>`;
+    let list = [];
+    try { list = (await api.listTournaments('public')).filter(isAim); } catch (e) { $('#agrid').innerHTML = `<div class="notice bad">${esc(e.message)}</div>`; return; }
+    const draw = () => {
+      $$('#aseg2 button').forEach(b => b.classList.toggle('on', b.dataset.f === aimState.filter));
+      let l = list;
+      const f = aimState.filter;
+      if (f === 'actual') l = l.filter(t => ['registration', 'closed', 'ongoing'].includes(t.stage)).sort((a, b) => (b.stage === 'ongoing') - (a.stage === 'ongoing') || a.starts_at.localeCompare(b.starts_at));
+      if (f === 'reg') l = l.filter(regOpen);
+      if (f === 'live') l = l.filter(t => t.stage === 'ongoing');
+      if (f === 'past') l = l.filter(t => ['finished', 'cancelled'].includes(t.stage)).reverse();
+      $('#agrid').innerHTML = l.length ? `<div class="tgrid">${l.map(tcard).join('')}</div>`
+        : `<div class="empty"><div class="head">Аим-турниров не найдено</div>Попробуйте другой фильтр — или <a href="#/create/aim" style="color:var(--accent)">проведите свой</a>.</div>`;
+    };
+    $$('#aseg2 button').forEach(b => b.onclick = () => { aimState.filter = b.dataset.f; draw(); });
+    draw();
   }
 
   // =================== рейтинг ===================
@@ -502,7 +537,8 @@
           <span>Призы</span><b>${esc(t.prize || '—')}</b>
           <span>Взнос</span><b>${esc(t.entry_fee || 'Бесплатно')}</b>
         </div>${t.contact_url ? `<a class="btn block" style="margin-top:16px" href="${esc(t.contact_url)}" target="_blank" rel="noopener">Связь с организатором ${I.ext}</a>` : ''}</div>
-        <div class="card"><div class="box-title">Пул карт</div><div class="maps">${t.map_pool.map(m => `<span class="map-tag">${esc(m)}</span>`).join('')}</div></div>
+        ${noVeto(t) ? `<div class="card"><div class="box-title">Карта</div>${t.map_pool[0] ? `<div class="maps"><span class="map-tag">${esc(t.map_pool[0])}</span></div><div class="hint">Все матчи на этой карте, без пиков и банов.</div>` : '<div class="hint" style="margin:0">Без пиков и банов — карту назначает организатор.</div>'}</div>`
+          : `<div class="card"><div class="box-title">Пул карт</div><div class="maps">${t.map_pool.map(m => `<span class="map-tag">${esc(m)}</span>`).join('')}</div></div>`}
       </div></div>`;
   }
 
@@ -730,7 +766,7 @@
           <div class="hint">${m.is_bye ? 'Проход без игры' : m.status === 'live' ? '<span style="color:#ff8587">● Матч идёт</span>' : m.scheduled_at ? esc(fmtDate(m.scheduled_at)) + ' · ' + relTime(m.scheduled_at) : 'Время не назначено'}</div></div>
         <div class="side ${win(m.team_b)}">${teamLogo(B)}<b>${B ? esc(B.name) : 'TBD'}</b></div>
       </div>
-      ${m.is_bye ? '' : `<div class="box-title">Пики и баны</div>${turn}<div class="veto">${tiles}</div>
+      ${m.is_bye ? '' : noVeto(t) ? `<div class="box-title">Карта</div><div class="turn">${t.map_pool[0] ? `Матч играется на <b>${esc(t.map_pool[0])}</b> — без пиков и банов.` : 'Без пиков и банов — карту назначает организатор.'}</div>` : `<div class="box-title">Пики и баны</div>${turn}<div class="veto">${tiles}</div>
       ${log.length ? `<div class="vlog">${log.map((l, i) => `<div>${i + 1}. <b>${sideName(l.side)}</b> ${l.action === 'ban' ? 'банит' : 'выбирает'} ${esc(l.map)}</div>`).join('')}${m.veto.decider ? `<div>Решающая карта: <b>${esc(m.veto.decider)}</b></div>` : ''}</div>` : ''}`}
       ${manage}`, { wide: true, onClose: () => { if (location.hash.includes('/m/')) history.replaceState(null, '', `#/t/${t.id}/${tCache._tab || 'bracket'}`); } });
     md.dataset.match = mid;
@@ -811,9 +847,12 @@
 
   // ---------- форма турнира (создание и редактирование) ----------
   function tournamentForm(box, t, onSubmit, submitLabel) {
-    t = t || { mode: '5v5', max_teams: 16, max_subs: 1, region: 'RU / СНГ', map_pool: MAPS.slice(0, 7), bo_default: 1, bo_semifinal: 3, bo_final: 3, entry_fee: 'Бесплатно', format: 'single', group_count: 2, group_advance: 2, checkin_minutes: null };
+    t = { ...(t && t.id ? {} : { mode: '5v5', max_teams: 16, max_subs: 1, region: 'RU / СНГ', map_pool: MAPS.slice(0, 7), bo_default: 1, bo_semifinal: 3, bo_final: 3, entry_fee: 'Бесплатно', format: 'single', group_count: 2, group_advance: 2, checkin_minutes: null }), ...(t || {}) };
     const fmt = t.format || 'single';
-    const pool = Array.from(new Set([...MAPS, ...t.map_pool]));
+    const noPick = t.mode === '1v1' && t.map_pool.length < 5;
+    const aimMap = noPick ? (t.map_pool[0] || '') : '';
+    const pool = Array.from(new Set([...MAPS, ...(noPick ? [] : t.map_pool)]));
+    const checked = noPick ? MAPS.slice(0, 7) : t.map_pool;
     const bo = (name, v) => `<select name="${name}">${[1, 3, 5].map(b => `<option value="${b}" ${b === v ? 'selected' : ''}>Bo${b}</option>`).join('')}</select>`;
     box.innerHTML = `<form novalidate>
       <div class="form-sec" style="padding-top:0"><h3>Основное</h3>
@@ -845,7 +884,12 @@
           <div class="field"><label class="f">Полуфинал</label>${bo('bo_semifinal', t.bo_semifinal)}</div>
           <div class="field"><label class="f">Финал</label>${bo('bo_final', t.bo_final)}</div>
         </div>
-        <div class="field"><label class="f">Пул карт (5–10)</label><div class="pool">${pool.map(m => `<label><input type="checkbox" name="map" value="${esc(m)}" ${t.map_pool.includes(m) ? 'checked' : ''}>${esc(m)}</label>`).join('')}</div></div>
+        <div class="field" id="pickBox"><label class="f">Выбор карты</label><div class="seg" id="pickSeg"><button type="button" data-pick="veto" class="${noPick ? '' : 'on'}">Пики и баны</button><button type="button" data-pick="none" class="${noPick ? 'on' : ''}">Без выбора карт</button></div>
+          <input type="hidden" name="pick" value="${noPick ? 'none' : 'veto'}"></div>
+        <div class="field" id="aimBox"><label class="f">Карта (необязательно)</label><input type="text" name="aim_map" maxlength="32" value="${esc(aimMap)}" placeholder="aim_map, aim_redline, aim_botz…" list="aimMaps">
+          <datalist id="aimMaps">${AIM_MAPS.map(m => `<option value="${m}">`).join('')}</datalist>
+          <div class="hint">Все матчи играются на этой карте, пиков и банов нет. Пусто — карту назначает организатор.</div></div>
+        <div class="field" id="poolBox"><label class="f">Пул карт (5–10)</label><div class="pool">${pool.map(m => `<label><input type="checkbox" name="map" value="${esc(m)}" ${checked.includes(m) ? 'checked' : ''}>${esc(m)}</label>`).join('')}</div></div>
       </div>
       <div class="form-sec"><h3>Призы и ссылки</h3>
         <div class="grid2">
@@ -858,7 +902,14 @@
       <div class="row" style="padding-top:18px"><button class="btn pri lg">${submitLabel}</button></div>
     </form>`;
     const f = $('form', box);
-    const syncMode = () => { const m = f.mode.value; $('#subsBox', box).classList.toggle('hidden', m === '1v1'); };
+    const syncMode = () => {
+      const m = f.mode.value, solo = m === '1v1', none = solo && f.pick.value === 'none';
+      $('#subsBox', box).classList.toggle('hidden', solo);
+      $('#pickBox', box).classList.toggle('hidden', !solo);
+      $('#aimBox', box).classList.toggle('hidden', !none);
+      $('#poolBox', box).classList.toggle('hidden', none);
+    };
+    $$('#pickSeg button', box).forEach(b => b.onclick = () => { f.pick.value = b.dataset.pick; $$('#pickSeg button', box).forEach(x => x.classList.toggle('on', x === b)); syncMode(); });
     $$('#modeSeg button', box).forEach(b => b.onclick = () => { f.mode.value = b.dataset.mode; $$('#modeSeg button', box).forEach(x => x.classList.toggle('on', x === b)); syncMode(); });
     syncMode();
     const syncFmt = () => $('#grpBox', box).classList.toggle('hidden', f.format.value !== 'groups');
@@ -868,10 +919,11 @@
     f.onsubmit = async e => {
       e.preventDefault();
       const v = Object.fromEntries(new FormData(f));
-      const maps = $$('input[name=map]:checked', f).map(x => x.value);
+      const noMaps = v.mode === '1v1' && v.pick === 'none';
+      const maps = noMaps ? (v.aim_map.trim() ? [v.aim_map.trim()] : []) : $$('input[name=map]:checked', f).map(x => x.value);
       if (v.title.trim().length < 3) return toast('Название — минимум 3 символа', 'bad');
       if (!v.starts_at) return toast('Укажите дату начала', 'bad');
-      if (maps.length < 5 || maps.length > 10) return toast('Выберите от 5 до 10 карт', 'bad');
+      if (!noMaps && (maps.length < 5 || maps.length > 10)) return toast('Выберите от 5 до 10 карт', 'bad');
       const btn = $('button.pri', f); btn.disabled = true;
       await onSubmit({
         title: v.title.trim(), description: v.description, rules: v.rules, mode: v.mode,
@@ -886,15 +938,15 @@
   }
 
   // =================== создание турнира ===================
-  function viewCreate() {
+  function viewCreate(aim) {
     const me = api.me;
     if (!me) {
       app.innerHTML = `<div class="wrap section"><div class="empty" style="max-width:560px;margin:0 auto"><div class="head">Создать турнир</div><p style="margin-bottom:18px">Чтобы провести турнир, войдите через Steam. Это нужно, чтобы игроки знали, кто организатор.</p><button class="btn steam lg" id="lg">${I.steam}Войти через Steam</button></div></div>`;
       $('#lg').onclick = () => api.login(); return;
     }
-    app.innerHTML = `<div class="wrap section"><div class="sec-head"><div><h2>Новый турнир</h2><div class="sub">${me.is_admin ? 'Вы администратор — турнир опубликуется сразу.' : 'После отправки турнир проверит модератор, обычно это быстро. Потом откроется регистрация.'}</div></div></div>
+    app.innerHTML = `<div class="wrap section"><div class="sec-head"><div><h2>${aim ? 'Новый аим-турнир' : 'Новый турнир'}</h2><div class="sub">${me.is_admin ? 'Вы администратор — турнир опубликуется сразу.' : 'После отправки турнир проверит модератор, обычно это быстро. Потом откроется регистрация.'}</div></div></div>
       <div class="card form-card" id="cf"></div></div>`;
-    tournamentForm($('#cf'), null, async p => {
+    tournamentForm($('#cf'), aim ? { mode: '1v1', max_subs: 0, map_pool: ['aim_map'], bo_default: 1, bo_semifinal: 1, bo_final: 3, title: '' } : null, async p => {
       const id = await act(() => api.createTournament(p));
       if (id) { toast(me.is_admin ? 'Турнир опубликован' : 'Турнир отправлен на модерацию'); go('#/t/' + id); }
     }, me.is_admin ? 'Опубликовать турнир' : 'Отправить на модерацию');
@@ -1035,7 +1087,8 @@
         if (tCache && tCache.t.id === b && !switching) return drawTournament(c === 'm' ? (tCache._tab || 'bracket') : (c || 'overview'), c === 'm' ? d : null, true);
         return await viewTournament(b, c === 'm' ? 'bracket' : (c || 'overview'), c === 'm' ? d : null);
       }
-      if (a === 'create') { setTitle('Новый турнир'); return viewCreate(); }
+      if (a === 'create') { setTitle(b === 'aim' ? 'Новый аим-турнир' : 'Новый турнир'); return viewCreate(b === 'aim'); }
+      if (a === 'aim') return await viewAim();
       if (a === 'rating') return await viewRating();
       if (a === 'me') { setTitle('Мой профиль'); return await viewMe(); }
       if (a === 'admin') setTitle('Модерация');
