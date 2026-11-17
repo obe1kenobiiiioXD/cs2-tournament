@@ -6,10 +6,8 @@
 <title>Organizm — турниры по CS2</title>
 <meta name="description" content="Все турниры по Counter-Strike 2 в одном месте: регистрация команд через Steam, сетки, пики и баны карт, результаты в реальном времени.">
 <meta name="theme-color" content="#0b0c0e">
+<meta name="referrer" content="no-referrer">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='6' y='6' width='20' height='20' transform='rotate(45 16 16)' fill='none' stroke='%23f2a900' stroke-width='3'/%3E%3Crect x='12.5' y='12.5' width='7' height='7' transform='rotate(45 16 16)' fill='%23f2a900'/%3E%3C/svg%3E">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
@@ -34,12 +32,15 @@
 <footer><div class="wrap">
   <span>Organizm — платформа турниров по Counter-Strike 2 для сообщества</span>
   <span>Вход через Steam. Сайт не связан с Valve Corporation.</span>
+  <a href="#/storage">Данные на устройстве</a>
 </div></footer>
 <div id="toasts"></div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="assets/vendor/supabase/supabase.js"></script>
 <script src="assets/config.js"></script>
+<script src="assets/privacy.js"></script>
 <script src="assets/api.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>
+

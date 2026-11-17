@@ -40,18 +40,21 @@
 
   function avatar(p, cls = '') {
     if (!p) return `<span class="avatar ph ${cls}">?</span>`;
-    if (p.avatar_url) return `<img class="avatar ${cls}" src="${esc(p.avatar_url)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
+    const src = window.OrganizmPrivacy.imageUrl(p.avatar_url);
+    if (src) return `<img class="avatar ${cls}" src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer">`;
     const hue = hash(p.steam_id || p.nickname) % 360;
     return `<span class="avatar ph ${cls}" style="background:hsl(${hue} 35% 26%);color:hsl(${hue} 70% 78%)">${esc((p.nickname || '?').slice(0, 1).toUpperCase())}</span>`;
   }
   function teamLogo(t, cls = '') {
     if (!t) return `<span class="tlogo ${cls}">?</span>`;
-    if (t.logo_url) return `<span class="tlogo ${cls}"><img src="${esc(t.logo_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`;
+    const src = window.OrganizmPrivacy.imageUrl(t.logo_url);
+    if (src) return `<span class="tlogo ${cls}"><img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" style="width:100%;height:100%;object-fit:cover" onerror="this.remove()"></span>`;
     const hue = hash(t.name) % 360;
     return `<span class="tlogo ${cls}" style="background:hsl(${hue} 30% 22%);color:hsl(${hue} 70% 75%)">${esc((t.tag || t.name).slice(0, 3).toUpperCase())}</span>`;
   }
   function banner(t) {
-    if (t.banner_url) return `<img src="${esc(t.banner_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=window.__genBan('${esc(t.id)}','${esc(t.mode)}')">`;
+    const src = window.OrganizmPrivacy.imageUrl(t.banner_url);
+    if (src) return `<img src="${esc(src)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=window.__genBan('${esc(t.id)}','${esc(t.mode)}')">`;
     return genBan(t.id, t.mode);
   }
   function genBan(id, mode) {
@@ -115,15 +118,16 @@
   }
   // поле картинки: ссылка или загрузка файла
   function imgField(name, label, value, kind) {
+    const src = window.OrganizmPrivacy.imageUrl(value);
     return `<div class="field imgf" data-kind="${kind}"><label class="f">${label}</label>
-      <div class="imgrow"><span class="imgprev ${kind}">${value ? `<img src="${esc(value)}" alt="">` : ''}</span>
+      <div class="imgrow"><span class="imgprev ${kind}">${src ? `<img src="${esc(src)}" alt="">` : ''}</span>
       <div style="flex:1;min-width:0"><input type="url" name="${name}" value="${esc(value || '')}" placeholder="https://… или загрузите файл">
-      <div class="row" style="gap:8px;margin-top:6px"><label class="btn sm">Загрузить файл<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>${value ? '<button type="button" class="btn sm ghost" data-clear>Убрать</button>' : ''}<span class="hint" style="margin:0" data-st></span></div></div></div></div>`;
+      <div class="row" style="gap:8px;margin-top:6px"><label class="btn sm">Загрузить файл<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>${value ? '<button type="button" class="btn sm ghost" data-clear>Убрать</button>' : ''}<span class="hint" style="margin:0" data-st></span></div><div class="hint">Показываются изображения с адреса площадки. Картинки с внешних сайтов автоматически не загружаются.</div></div></div></div>`;
   }
   function bindImgFields(root) {
     $$('.imgf', root).forEach(box => {
       const inp = $('input[type=url]', box), file = $('input[type=file]', box), prev = $('.imgprev', box), st = $('[data-st]', box);
-      const show = v => { prev.innerHTML = v ? `<img src="${esc(v)}" alt="">` : ''; };
+      const show = v => { const src = window.OrganizmPrivacy.imageUrl(v); prev.innerHTML = src ? `<img src="${esc(src)}" alt="">` : ''; };
       inp.oninput = () => show(inp.value.trim());
       const clr = $('[data-clear]', box); if (clr) clr.onclick = () => { inp.value = ''; show(''); };
       file.onchange = async () => {
@@ -975,7 +979,7 @@
           <form id="pf">
             <div class="field"><label class="f">Discord</label><input type="text" name="discord" maxlength="64" value="${esc(contacts.discord || '')}" placeholder="nickname"></div>
             <div class="field"><label class="f">Telegram</label><input type="text" name="telegram" maxlength="64" value="${esc(contacts.telegram || '')}" placeholder="@nickname"></div>
-            <div class="hint" style="margin:-8px 0 14px">Контакты видят только ваши сокомандники и организаторы турниров, где вы играете.</div>
+            <div class="hint" style="margin:-8px 0 14px">Контакты необязательны. Их видят ваши сокомандники, организаторы ваших турниров и администраторы. Если вы ищете команду, контакты доступны капитанам этого турнира; приглашённый игрок видит контакты пригласившего капитана.</div>
             <div class="field"><label class="f">Профиль FACEIT</label><input type="url" name="faceit_url" value="${esc(me.faceit_url || '')}" placeholder="https://www.faceit.com/ru/players/…"></div>
             <div class="grid2"><div class="field"><label class="f">Уровень FACEIT</label><select name="faceit_level"><option value="">—</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => `<option ${n === me.faceit_level ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
             <div class="field"><label class="f">Рейтинг Premier</label><input type="number" name="premier_rating" min="0" max="50000" value="${me.premier_rating ?? ''}"></div></div>
@@ -1072,6 +1076,27 @@
     load();
   }
 
+  function viewStorage() {
+    setTitle('Данные на устройстве');
+    app.innerHTML = `<div class="wrap section"><div class="card" style="max-width:800px;margin:auto">
+      <h1>Данные на устройстве</h1>
+      <p style="margin-top:16px">Для сохранения входа сайт использует локальное хранилище браузера. Оно содержит токены сессии, поэтому не передавайте его содержимое другим людям.</p>
+      <ul style="padding-left:22px;margin:16px 0"><li><code>organizm-auth</code> — сохранённая сессия входа.</li>
+      <li><code>organizm-auth-code-verifier</code> — служебные данные авторизации, если они созданы библиотекой.</li>
+      <li><code>organizm_back</code> — страница возврата после входа, в хранилище текущей вкладки.</li>
+      <li><code>organizm_demo_v3</code> — примерные данные демо-режима, если вы его включали.</li></ul>
+      <p>В коде площадки нет подключения рекламной аналитики. Шрифты используются с вашего устройства, библиотека подключения к базе загружается вместе с сайтом. Внешние аватары и обложки автоматически не загружаются.</p>
+      <p style="margin-top:16px">Очистка завершит сохранённый вход на этом устройстве и удалит локальные демо-данные. Профиль, контакты и история на сервере сохранятся; сессии на других устройствах не отзываются. Это не запрос на удаление аккаунта и не отзыв согласия на обработку персональных данных.</p>
+      <button class="btn danger" id="clearDevice" style="margin-top:20px">Удалить данные на этом устройстве</button>
+      <div class="hint" id="storageResult" role="status"></div>
+    </div></div>`;
+    $('#clearDevice').onclick = async () => {
+      if (!await ask('Удалить сохранённый вход и демо-данные на этом устройстве?', { ok: 'Удалить', danger: true })) return;
+      try { window.OrganizmPrivacy.clearDeviceData(); location.reload(); }
+      catch (_) { $('#storageResult').textContent = 'Браузер не разрешил очистку. Удалите данные этого сайта в настройках браузера.'; }
+    };
+  }
+
   // =================== роутер ===================
   async function render() {
     const parts = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
@@ -1085,6 +1110,7 @@
     renderHeader(a === 't' || !a ? 'home' : a);
     if (switching) window.scrollTo(0, 0);
     try {
+      if (a === 'storage') return viewStorage();
       if (!a) return await viewHome();
       if (a === 't' && b) {
         if (tCache && tCache.t.id === b && !switching) return drawTournament(c === 'm' ? (tCache._tab || 'bracket') : (c || 'overview'), c === 'm' ? d : null, true);
