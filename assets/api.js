@@ -4,6 +4,7 @@
 
   // ---------- общие правила (те же, что в базе) ----------
   function vetoSequence(bo, pool) {
+    if (pool < 2) return [];
     if (bo === 1) return Array(pool - 1).fill('ban');
     if (bo === 3) { const bans = pool - 3; return [...Array(Math.min(2, bans)).fill('ban'), 'pick', 'pick', ...Array(Math.max(bans - 2, 0)).fill('ban')]; }
     return [...Array(Math.max(pool - 5, 0)).fill('ban'), 'pick', 'pick', 'pick', 'pick'];
@@ -413,7 +414,13 @@
         }
       }
     }
+    function requireGroupResultEdit(m) {
+      if (m.bracket === 'group' && db.matches.some(x => x.tournament_id === m.tournament_id && x.bracket !== 'group')) {
+        fail('Плей-офф уже создан — результаты и участников групп менять нельзя');
+      }
+    }
     function report(m, a, b) {
+      requireGroupResultEdit(m);
       (m.team_a && m.team_b) || fail('В матче ещё нет обеих команд');
       (a >= 0 && b >= 0 && a !== b) || fail('Укажите счёт без ничьей');
       const w = a > b ? m.team_a : m.team_b, prev = m.winner_id;
@@ -650,6 +657,11 @@
       },
       async updateMatch(mid, p) {
         const m = M(mid); needManage(T(m.tournament_id));
+        const teamsChanged = ['team_a', 'team_b'].some(k => k in p && (p[k] || null) !== (m[k] || null));
+        if (teamsChanged) {
+          requireGroupResultEdit(m);
+          if (m.status === 'finished' || m.winner_id) fail('Перед заменой команд сбросьте результат матча');
+        }
         for (const k of ['team_a', 'team_b', 'scheduled_at', 'best_of']) if (k in p) m[k] = p[k] === '' ? null : p[k];
         if (p.status && !m.winner_id) m.status = p.status;
         m.best_of = Number(m.best_of); save();
@@ -657,6 +669,7 @@
       async reportResult(mid, a, b) { const m = M(mid); needManage(T(m.tournament_id)); report(m, a, b); save(); },
       async resetResult(mid) {
         const m = M(mid); needManage(T(m.tournament_id));
+        requireGroupResultEdit(m);
         m.is_bye && fail('Проход без игры нельзя сбросить — пересоздайте сетку');
         unwind(m); Object.assign(m, { score_a: null, score_b: null, winner_id: null, status: 'pending' }); save();
       },
@@ -826,3 +839,4 @@
     vetoSequence, groupStandings, MAP_POOL,
   };
 })();
+
