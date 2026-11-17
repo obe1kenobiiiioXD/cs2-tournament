@@ -888,7 +888,7 @@ language plpgsql security definer set search_path = public as $$
 declare r tournaments; ids uuid[]; pool uuid[]; n int;
 begin
   perform public._require_manage(t);
-  select * into r from tournaments where id = t;
+  select * into r from tournaments where id = t for update;
   -- участвуют все команды, а при включённом чек-ине — только подтвердившие участие
   select array_agg(id order by created_at) into pool from teams
   where tournament_id = t and (r.checkin_minutes is null or checked_in_at is not null);
@@ -928,7 +928,7 @@ language plpgsql security definer set search_path = public as $$
 declare r tournaments; ids uuid[];
 begin
   perform public._require_manage(t);
-  select * into r from tournaments where id = t;
+  select * into r from tournaments where id = t for update;
   if r.format <> 'groups' then raise exception 'Плей-офф из групп есть только в формате «Группы + плей-офф»'; end if;
   if not exists (select 1 from matches where tournament_id = t and bracket = 'group') then raise exception 'Сначала сформируйте группы'; end if;
   if exists (select 1 from matches where tournament_id = t and bracket = 'group' and status <> 'finished') then
@@ -942,6 +942,17 @@ begin
   update tournaments set stage = 'ongoing', updated_at = now() where id = t;
 end $$;
 
+-- После создания плей-офф состав вышедших команд зафиксирован.
+create or replace function public._require_group_result_edit(m public.matches) returns void
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if m.bracket = 'group' and exists (
+    select 1 from matches where tournament_id = m.tournament_id and bracket <> 'group'
+  ) then
+    raise exception 'Плей-офф уже создан — результаты и участников групп менять нельзя';
+  end if;
+end $$;
+
 create or replace function public.update_match(mid uuid, p jsonb) returns void
 language plpgsql security definer set search_path = public as $$
 declare m matches;
@@ -949,6 +960,17 @@ begin
   select * into m from matches where id = mid;
   if not found then raise exception 'Матч не найден'; end if;
   perform public._require_manage(m.tournament_id);
+  -- Один порядок блокировок с генерацией плей-офф и записью результатов.
+  perform 1 from tournaments where id = m.tournament_id for update;
+  select * into m from matches where id = mid for update;
+  if not found then raise exception 'Матч не найден'; end if;
+  if (p ? 'team_a' and nullif(p->>'team_a', '')::uuid is distinct from m.team_a)
+     or (p ? 'team_b' and nullif(p->>'team_b', '')::uuid is distinct from m.team_b) then
+    perform public._require_group_result_edit(m);
+    if m.status = 'finished' or m.winner_id is not null then
+      raise exception 'Перед заменой команд сбросьте результат матча';
+    end if;
+  end if;
   if (p ? 'team_a' and nullif(p->>'team_a', '') is not null and not exists (select 1 from teams where id = (p->>'team_a')::uuid and tournament_id = m.tournament_id))
      or (p ? 'team_b' and nullif(p->>'team_b', '') is not null and not exists (select 1 from teams where id = (p->>'team_b')::uuid and tournament_id = m.tournament_id)) then
     raise exception 'Команда не из этого турнира';
@@ -970,6 +992,10 @@ begin
   select * into m from matches where id = mid;
   if not found then raise exception 'Матч не найден'; end if;
   perform public._require_manage(m.tournament_id);
+  perform 1 from tournaments where id = m.tournament_id for update;
+  select * into m from matches where id = mid for update;
+  if not found then raise exception 'Матч не найден'; end if;
+  perform public._require_group_result_edit(m);
   if m.team_a is null or m.team_b is null then raise exception 'В матче ещё нет обеих команд'; end if;
   if sa is null or sb is null or sa < 0 or sb < 0 or sa = sb then raise exception 'Укажите счёт без ничьей'; end if;
   w := case when sa > sb then m.team_a else m.team_b end;
@@ -987,6 +1013,10 @@ begin
   select * into m from matches where id = mid;
   if not found then raise exception 'Матч не найден'; end if;
   perform public._require_manage(m.tournament_id);
+  perform 1 from tournaments where id = m.tournament_id for update;
+  select * into m from matches where id = mid for update;
+  if not found then raise exception 'Матч не найден'; end if;
+  perform public._require_group_result_edit(m);
   if m.is_bye then raise exception 'Проход без игры нельзя сбросить — пересоздайте сетку'; end if;
   perform public._unwind(mid);
   update matches set score_a = null, score_b = null, winner_id = null, status = 'pending', updated_at = now() where id = mid;
@@ -1000,6 +1030,7 @@ create or replace function public.veto_sequence(bo int, pool_size int) returns t
 language plpgsql immutable as $$
 declare s text[] := array[]::text[]; bans int;
 begin
+  if coalesce(pool_size, 0) < 2 then return s; end if;
   if bo = 1 then
     for i in 1..pool_size - 1 loop s := s || 'ban'::text; end loop;
   elsif bo = 3 then
@@ -1230,3 +1261,4 @@ begin
              using (bucket_id = 'media' and owner = auth.uid())$p$;
   end if;
 end $$;
+

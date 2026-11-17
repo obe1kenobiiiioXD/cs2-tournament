@@ -720,7 +720,7 @@
     const m = matches.find(x => x.id === mid);
     if (!m) return;
     const A = teamById[m.team_a], B = teamById[m.team_b];
-    const seq = window.OrganizmApi.vetoSequence(m.best_of, t.map_pool.length);
+    const seq = noVeto(t) ? [] : window.OrganizmApi.vetoSequence(m.best_of, t.map_pool.length);
     const log = (m.veto && m.veto.log) || [];
     const step = log.length, done = step >= seq.length || !!(m.veto && m.veto.decider);
     const turnSide = step % 2 === 0 ? 'A' : 'B', turnTeam = turnSide === 'A' ? A : B;
@@ -743,19 +743,22 @@
     else turn = `<div class="turn ${myTurn ? 'me' : ''}">${myTurn ? `<b>Ваш ход:</b> ${seq[step] === 'ban' ? 'забаньте карту' : 'выберите карту'}.` : `Ход команды <b>${esc(turnTeam.name)}</b> — ${seq[step] === 'ban' ? 'бан' : 'пик'} (шаг ${step + 1} из ${seq.length}). Действует капитан.`}</div>`;
 
     const opts = (sel) => `<option value="">— пусто —</option>` + c.teams.map(x => `<option value="${esc(x.id)}" ${x.id === sel ? 'selected' : ''}>${esc(x.name)}</option>`).join('');
+    const groupLocked = m.bracket === 'group' && matches.some(x => x.bracket !== 'group');
+    const teamsLocked = groupLocked || m.status === 'finished' || !!m.winner_id;
     const manage = canManage ? `<div class="form-sec" style="padding-bottom:0"><h3>Управление матчем</h3>
+      ${groupLocked ? '<div class="notice warn">Плей-офф уже создан — результаты и участников групп менять нельзя.</div>' : teamsLocked ? `<div class="hint">${m.is_bye ? 'Автопроход: для замены команд пересоздайте сетку.' : 'Для замены команд сначала сбросьте результат матча.'}</div>` : ''}
       <div class="grid2">
-        <div class="field"><label class="f">Счёт ${esc(A ? A.name : 'A')}</label><input type="number" min="0" id="sa" value="${m.score_a ?? ''}"></div>
-        <div class="field"><label class="f">Счёт ${esc(B ? B.name : 'B')}</label><input type="number" min="0" id="sb" value="${m.score_b ?? ''}"></div>
+        <div class="field"><label class="f">Счёт ${esc(A ? A.name : 'A')}</label><input type="number" min="0" id="sa" value="${m.score_a ?? ''}" ${groupLocked ? 'disabled' : ''}></div>
+        <div class="field"><label class="f">Счёт ${esc(B ? B.name : 'B')}</label><input type="number" min="0" id="sb" value="${m.score_b ?? ''}" ${groupLocked ? 'disabled' : ''}></div>
       </div>
       <div class="hint" style="margin:-8px 0 12px">Для Bo1 — счёт по раундам (13:9), для Bo3/Bo5 — по картам (2:1). Победитель сам пройдёт дальше.</div>
-      <div class="row" style="margin-bottom:18px"><button class="btn pri" id="saveRes" ${A && B ? '' : 'disabled'}>Сохранить результат</button>${m.winner_id && !m.is_bye ? '<button class="btn danger" id="resetRes">Сбросить результат</button>' : ''}</div>
+      <div class="row" style="margin-bottom:18px"><button class="btn pri" id="saveRes" ${A && B && !groupLocked ? '' : 'disabled'}>Сохранить результат</button>${m.winner_id && !m.is_bye && !groupLocked ? '<button class="btn danger" id="resetRes">Сбросить результат</button>' : ''}</div>
       <div class="grid3">
         <div class="field"><label class="f">Время матча</label><input type="datetime-local" id="mtime" value="${toLocalInput(m.scheduled_at)}"></div>
         <div class="field"><label class="f">Формат</label><select id="mbo">${[1, 3, 5].map(b => `<option value="${b}" ${b === m.best_of ? 'selected' : ''}>Bo${b}</option>`).join('')}</select></div>
         <div class="field"><label class="f">Статус</label><select id="mst" ${m.winner_id ? 'disabled' : ''}><option value="pending" ${m.status === 'pending' ? 'selected' : ''}>Ожидает</option><option value="live" ${m.status === 'live' ? 'selected' : ''}>Идёт</option>${m.winner_id ? '<option selected>Сыгран</option>' : ''}</select></div>
       </div>
-      <div class="grid2"><div class="field"><label class="f">Команда A</label><select id="mta">${opts(m.team_a)}</select></div><div class="field"><label class="f">Команда B</label><select id="mtb">${opts(m.team_b)}</select></div></div>
+      <div class="grid2"><div class="field"><label class="f">Команда A</label><select id="mta" ${teamsLocked ? 'disabled' : ''}>${opts(m.team_a)}</select></div><div class="field"><label class="f">Команда B</label><select id="mtb" ${teamsLocked ? 'disabled' : ''}>${opts(m.team_b)}</select></div></div>
       <div class="row"><button class="btn" id="saveMatch">Сохранить матч</button>${log.length ? '<button class="btn danger" id="resetVeto">Сбросить пики/баны</button>' : ''}</div></div>` : '';
 
     const win = id => m.winner_id && m.winner_id === id ? 'w' : '';
@@ -1118,3 +1121,4 @@
     setInterval(() => { if (!location.hash || location.hash === '#/') { if (!document.activeElement || !document.activeElement.matches('input')) render(); } }, 120000);
   })();
 })();
+
